@@ -1,0 +1,204 @@
+package com.oldwei.isup.sdk.isapi;
+
+import com.oldwei.isup.model.Device;
+import com.oldwei.isup.model.xml.DeviceInfo;
+import com.oldwei.isup.model.xml.InputProxyChannelStatusList;
+import com.oldwei.isup.sdk.service.impl.CmsUtil;
+import com.oldwei.isup.service.DeviceCacheService;
+import com.oldwei.isup.util.XmlUtil;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+import java.util.Optional;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class ISAPIService {
+    private final CmsUtil cmsUtil;
+    private final DeviceCacheService deviceCacheService;
+
+
+    /**
+     * 获取设备信息（型号、版本、序列号等）
+     *
+     * @param lUserID
+     */
+    public DeviceInfo GetDevInfo(int lUserID) {
+        String getDevInfoURL = "GET /ISAPI/System/deviceInfo";
+        String contextXML = cmsUtil.passThrough(lUserID, getDevInfoURL, "");
+        return XmlUtil.fromXml(contextXML, DeviceInfo.class);
+    }
+
+    /**
+     * 获取所有数字通道状态
+     *
+     * @param lUserID
+     */
+    public InputProxyChannelStatusList GetAllDigitalChannelStatus(int lUserID) {
+        String GetAllDigitalChannelStatusURL = "GET /ISAPI/ContentMgmt/InputProxy/channels/status";
+        String contextXML = cmsUtil.passThrough(lUserID, GetAllDigitalChannelStatusURL, "");
+//        log.info("GetAllDigitalChannelStatusURL: {}", contextXML);
+        return XmlUtil.fromXml(contextXML, InputProxyChannelStatusList.class);
+    }
+
+    /**
+     * 云台控制 ISUP5.0透传接口
+     *
+     * @param lUserID
+     */
+    public void PTZCtrl(int lUserID, int channel) {
+        String PTZCtrlUrl = "PUT /ISAPI/PTZCtrl/channels/" + channel + "/continuous";
+        /**
+         * pan 表示水平运行速度 +60表示右移，其他方向运行参考类似方法
+         * tilt 表示垂直运行速度
+         */
+        String PTZCtrlInput = """
+                <?xml version: "1.0" encoding="UTF-8"?>
+                <PTZData>
+                    <pan>60</pan>
+                    <tilt>0</tilt>
+                </PTZData>""";
+        //接口调用成功后，云台会一直按照设置速度进行右转
+        cmsUtil.passThrough(lUserID, PTZCtrlUrl, PTZCtrlInput);
+        try {
+            Thread.sleep(5000); //云台运动持续时间1s后调用停止云台运动接口
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+        //发送云台运动停止请求
+        String PTZCtrlStopInput = """
+                <?xml version: "1.0" encoding="UTF-8"?>
+                <PTZData>
+                    <pan>0</pan>
+                    <tilt>0</tilt>
+                </PTZData>""";
+
+        cmsUtil.passThrough(lUserID, PTZCtrlUrl, PTZCtrlStopInput);
+    }
+
+    /**
+     * 控制云台移动
+     *
+     * @param deviceId   设备ID
+     * @param panSpeed   水平速度（-100~100，正为右，负为左）
+     * @param tiltSpeed  垂直速度（-100~100，正为上，负为下）
+     * @param durationMs 持续时间（毫秒）
+     */
+    public void controlPtz(String deviceId, Integer channelId, int panSpeed, int tiltSpeed, int durationMs) {
+        Optional<Device> oneOpt = deviceCacheService.getByDeviceId(deviceId);
+        if (oneOpt.isPresent()) {
+            Device device = oneOpt.get();
+            int userId = device.getLoginId();
+            String url = "PUT /ISAPI/PTZCtrl/channels/" + channelId + "/continuous";
+            String startXml = String.format("""
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <PTZData>
+                        <pan>%d</pan>
+                        <tilt>%d</tilt>
+                    </PTZData>
+                    """, panSpeed, tiltSpeed);
+
+            try {
+                // 启动云台移动
+                cmsUtil.passThrough(userId, url, startXml);
+                log.info("开始云台移动: userId={}, channel={}, pan={}, tilt={}", userId, channelId, panSpeed, tiltSpeed);
+
+                // 等待指定时间后停止
+                Thread.sleep(durationMs);
+
+                String stopXml = """
+                        <?xml version="1.0" encoding="UTF-8"?>
+                        <PTZData>
+                            <pan>0</pan>
+                            <tilt>0</tilt>
+                        </PTZData>
+                        """;
+                cmsUtil.passThrough(userId, url, stopXml);
+                log.info("停止云台移动: userId={}, channel={}", userId, channelId);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.error("云台控制线程被中断", e);
+            } catch (Exception e) {
+                log.error("云台控制异常: userId={}, channel={}, 错误={}", userId, channelId, e.getMessage(), e);
+                throw new RuntimeException("云台控制失败：" + e.getMessage(), e);
+            }
+        }
+
+    }
+
+
+    /**
+     * 远程抓图
+     * URL中的<ID>，格式A0B，A表示实际通道号，B传1表示主码流，传2表示子码流。
+     * 示例：GET /ISAPI/Streaming/channels/101/picture/async?format=json&imageType=JPEG&URLType=cloudURL表示获取通道1的主码流分辨率的抓图。
+     *
+     * @param lUserID
+     */
+    public void GetPicByCloud(int lUserID) {
+        String getPicURL = "GET /ISAPI/Streaming/channels/101/picture/async?format=json&imageType=JPEG&URLType=cloudURL";
+        cmsUtil.passThrough(lUserID, getPicURL, "");
+
+    }
+
+
+    /**
+     * 远程抓图
+     * URL中的<ID>，格式A0B，A表示实际通道号，B传1表示主码流，传2表示子码流。
+     * 示例：GET /ISAPI/Streaming/channels/101/picture/async?format=json&imageType=JPEG&URLType=cloudURL表示获取通道1的主码流分辨率的抓图。
+     *
+     * @param lUserID
+     */
+    public String FDSearch(int lUserID) {
+        String FDSearchURL = "POST /ISAPI/Intelligent/FDLib/FDSearch";
+
+        String FDSearchDescription = """
+                <FDSearchDescription version="2.0" xmlns="http://www.std-cgi.org/ver20/XMLSchema"><searchID>CB6D4429-E7E0-0001-5D6A-166F29C0B790</searchID><searchResultPosition>0</searchResultPosition><maxResults>15</maxResults><FDID>1</FDID><startTime></startTime><endTime></endTime><name></name><province></province><city></city><certificateType>ID</certificateType><certificateNumber></certificateNumber><phoneNumber></phoneNumber><FaceModeList><FaceMode><ModeInfo><similarity></similarity><modeData></modeData></ModeInfo></FaceMode></FaceModeList><modelingStatus></modelingStatus><modelStatus></modelStatus></FDSearchDescription>""";
+//        String FDSearchDescription = "";
+        return cmsUtil.passThrough(lUserID, FDSearchURL, FDSearchDescription);
+    }
+
+
+    /**
+     * 远程抓图
+     * URL中的<ID>，格式A0B，A表示实际通道号，B传1表示主码流，传2表示子码流。
+     * 示例：GET /ISAPI/Streaming/channels/101/picture/async?format=json&imageType=JPEG&URLType=cloudURL表示获取通道1的主码流分辨率的抓图。
+     *
+     * @param lUserID
+     */
+    public String searchLPListAudit(int lUserID, int channelId) {
+        String searchLPListAuditURL = "POST /ISAPI/Traffic/channels/" + channelId + "/searchLPListAudit";
+
+//        String FDSearchDescription = """
+//                <FDSearchDescription version="2.0" xmlns="http://www.std-cgi.org/ver20/XMLSchema"><searchID>CB6D4429-E7E0-0001-5D6A-166F29C0B790</searchID><searchResultPosition>0</searchResultPosition><maxResults>15</maxResults><FDID>1</FDID><startTime></startTime><endTime></endTime><name></name><province></province><city></city><certificateType>ID</certificateType><certificateNumber></certificateNumber><phoneNumber></phoneNumber><FaceModeList><FaceMode><ModeInfo><similarity></similarity><modeData></modeData></ModeInfo></FaceMode></FaceModeList><modelingStatus></modelingStatus><modelStatus></modelStatus></FDSearchDescription>""";
+        String FDSearchDescription = "";
+        return cmsUtil.passThrough(lUserID, searchLPListAuditURL, FDSearchDescription);
+    }
+
+
+    /**
+     * 远程抓图
+     * URL中的<ID>，格式A0B，A表示实际通道号，B传1表示主码流，传2表示子码流。
+     * 示例：GET /ISAPI/Streaming/channels/101/picture/async?format=json&imageType=JPEG&URLType=cloudURL表示获取通道1的主码流分辨率的抓图。
+     *
+     * @param lUserID
+     */
+    public String asyncImportDatas(Integer lUserID, String xmlUrl) {
+        String searchLPListAuditURL = "POST /ISAPI/Intelligent/FDLib/asyncImportDatas?format=json";
+        String faceLibId = "brecorder";
+        String taskId = "1ad321f56dssfd1dsc";
+        String FDSearchDescription = String.format("""
+                {
+                    "AsyncImportDatas": {
+                        "customFaceLibID": "%s",
+                        "taskID": "%s",
+                        "URL": "%s",
+                        "type": 0,
+                        "URLCertificationType": "AWS2_0"
+                    }
+                }
+                """, faceLibId, taskId, xmlUrl);
+        return cmsUtil.passThrough(lUserID, searchLPListAuditURL, FDSearchDescription);
+    }
+}
