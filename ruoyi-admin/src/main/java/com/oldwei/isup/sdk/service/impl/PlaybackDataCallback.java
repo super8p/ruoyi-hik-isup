@@ -66,7 +66,10 @@ public class PlaybackDataCallback implements PLAYBACK_DATA_CB {
 
 
         if (dataStream != null && dataStream.length > 0) {
-            if (pDataCBInfo.dwType == 2) {
+            if (pDataCBInfo.dwType == 1) {
+                log.info("收到回放系统头数据 (dwType=1)，长度: {}", pDataCBInfo.dwDataLen);
+            }
+            if (pDataCBInfo.dwType == 1 || pDataCBInfo.dwType == 2) {
                 int dwBufSize = pDataCBInfo.dwDataLen;
                 Pointer pBuffer = pDataCBInfo.pData;
                 byte[] rtpPacket = new byte[1456];

@@ -11,9 +11,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
-import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
+import java.net.URLDecoder;
 
 /**
  * 流媒体控制接口（预览、回放）
@@ -137,7 +137,6 @@ public class StreamController {
             return R.ok(playURL);
         }
 
-
         Integer loginId = device.getLoginId();
         mediaStreamService.playbackByTime(streamKey, loginId, channelId, startTime, endTime);
 
@@ -175,10 +174,10 @@ public class StreamController {
     private String buildWebrtcStreamUrl(String prefix, String streamKey) {
         Boolean isSSL = hikStreamProperties.getIsSSL();
         if (isSSL != null && isSSL) {
-            return "https://" + hikStreamProperties.getDomain() + "/index/api/webrtc?app=" + prefix + "&stream=" + streamKey + "&type=play";
+            return "https://" + hikStreamProperties.getDomain() + "/index/api/webrtc?app=" + prefix + "&stream=" + streamKey + "&type=play&secret=hik12345";
         }
         return "http://" + hikStreamProperties.getHttp().getIp() + ":"
-                + hikStreamProperties.getHttp().getPort() + "/index/api/webrtc?app=" + prefix + "&stream=" + streamKey + "&type=play";
+                + hikStreamProperties.getHttp().getPort() + "/index/api/webrtc?app=" + prefix + "&stream=" + streamKey + "&type=play&secret=hik12345";
     }
 
     /**
@@ -221,26 +220,28 @@ public class StreamController {
             sdp = "";
         }
         try {
-            cn.hutool.http.HttpResponse resp = cn.hutool.http.HttpRequest.post(targetUrl)
+            String decodedTargetUrl = URLDecoder.decode(targetUrl, StandardCharsets.UTF_8);
+            cn.hutool.http.HttpResponse resp = cn.hutool.http.HttpRequest.post(decodedTargetUrl)
                     .timeout(30000)
                     .header("Content-Type", "text/plain; charset=utf-8")
                     .body(sdp)
                     .execute();
+
             String body = resp.body();
-            if (resp.getStatus() == 200) {
-                // 如果是 JSON 格式，解析并提取 sdp
-                if (body != null && body.trim().startsWith("{")) {
-                    com.alibaba.fastjson2.JSONObject json = com.alibaba.fastjson2.JSON.parseObject(body);
-                    if (json.containsKey("sdp")) {
-                        return R.ok(json.getString("sdp"));
-                    } else if (json.containsKey("code") && json.getIntValue("code") != 0) {
-                        return R.fail("流媒体服务返回错误: " + json.getString("msg"));
-                    }
-                }
-                return R.ok(body);
-            } else {
+            if (resp.getStatus() != 200) {
                 return R.fail("流媒体服务请求失败，HTTP 状态码: " + resp.getStatus() + ", 响应: " + body);
             }
+
+            if (body != null && body.trim().startsWith("{")) {
+                com.alibaba.fastjson2.JSONObject json = com.alibaba.fastjson2.JSON.parseObject(body);
+                if (json.containsKey("sdp")) {
+                    return R.ok(json.getString("sdp"));
+                }
+                if (json.containsKey("code") && json.getIntValue("code") != 0) {
+                    return R.fail("流媒体服务返回错误: " + json.getString("msg"));
+                }
+            }
+            return R.ok(body);
         } catch (Exception e) {
             log.error("webrtc sdp proxy failed, targetUrl={}", targetUrl, e);
             return R.fail("代理 WebRTC SDP 请求异常: " + e.getMessage());

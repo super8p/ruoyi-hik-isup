@@ -83,6 +83,13 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Edge TTS Java -->
+        <dependency>
+            <groupId>io.github.whitemagic2014</groupId>
+            <artifactId>tts-edge-java</artifactId>
+            <version>1.3.3</version>
+        </dependency>
+
         <!-- Commons Text -->
         <dependency>
             <groupId>org.apache.commons</groupId>

@@ -1,7 +1,7 @@
 # 椤圭洰鐩稿叧閰嶇疆
 ruoyi:
   # 鍚嶇О
-  name: RuoYi
+  name: ruoyi-hik-isup
   # 鐗堟湰
   version: 3.9.2
   # 鐗堟潈骞翠唤
@@ -135,7 +135,7 @@ referer:
   # 闃茬洍閾惧紑鍏?
   enabled: false
   # 鍏佽鐨勫煙鍚嶅垪琛?
-  allowed-domains: localhost,127.0.0.1,ruoyi.vip,www.ruoyi.vip
+  allowed-domains: localhost,127.0.0.1
 
 # 闃叉XSS鏀诲嚮
 xss:

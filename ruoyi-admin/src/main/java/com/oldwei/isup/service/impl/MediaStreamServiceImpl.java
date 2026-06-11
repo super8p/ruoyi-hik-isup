@@ -33,9 +33,7 @@ public class MediaStreamServiceImpl implements IMediaStreamService {
     private final IHikISUPStream hikISUPStream;
     private final HCISUPCMS hcisupcms;
     private final ZLMApi zlmApi;
-    // 每个设备一个 latch，用于控制阻塞/停止
-    private final Map<String, CountDownLatch> latchMap = new ConcurrentHashMap<>();
-    private final Map<String, CountDownLatch> playbackLatchMap = new ConcurrentHashMap<>();
+
 
     // RTP端口管理：起始端口
     private static final int RTP_PORT_START = 30002;
@@ -44,27 +42,16 @@ public class MediaStreamServiceImpl implements IMediaStreamService {
     private final Map<Integer, Boolean> allocatedPorts = new ConcurrentHashMap<>();
 
     @Override
-    @Async("taskExecutor")
     public void preview(Device device, Integer channelId) {
         if (channelId == null) return;
         // 防重复：如果该设备已在预览或已有RTP服务，直接返回
         String streamKey = device.getDeviceId() + "_" + channelId;
-        if (latchMap.containsKey(streamKey) || StreamManager.deviceRTP.containsKey(streamKey)) {
+        if (StreamManager.deviceRTP.containsKey(streamKey)) {
             log.info("通道已在预览中，忽略重复开启: {}", streamKey);
             return;
         }
-        CountDownLatch latch = new CountDownLatch(1);
-        latchMap.put(streamKey, latch);
-        try {
-            // 创建异步控制器
-            RealPlay(device, channelId);
-            // 阻塞，直到 stopPreview() 调用 latch.countDown()
-            latch.await();
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        } finally {
-            latchMap.remove(streamKey);
-        }
+        // 创建异步控制器
+        RealPlay(device, channelId);
     }
 
     public void stopPreview(Device device, Integer channelId) {
@@ -112,11 +99,7 @@ public class MediaStreamServiceImpl implements IMediaStreamService {
             StreamManager.deviceRTP.remove(streamKey);
         }
         log.info("CMS已发送停止预览请求");
-        CountDownLatch latch = latchMap.get(streamKey);
-        if (latch != null) {
-            latch.countDown(); // 唤醒 preview
-            log.info("结束预览实例: {}", streamKey);
-        }
+
     }
 
     /**
@@ -158,14 +141,15 @@ public class MediaStreamServiceImpl implements IMediaStreamService {
         struPreviewInV11.dwLinkMode = 0; //0- TCP方式，1- UDP方式
         struPreviewInV11.dwStreamType = 0; //码流类型：0- 主码流，1- 子码流, 2- 第三码流
         log.info("ip: {}, port: {}", hikIsupProperties.getSmsServer().getIp(), hikIsupProperties.getSmsServer().getPort());
-        struPreviewInV11.struStreamSever.szIP = hikIsupProperties.getSmsServer().getIp().getBytes();//流媒体服务器IP地址,公网地址
+        String smsIp = hikIsupProperties.getSmsServer().getIp();
+        System.arraycopy(smsIp.getBytes(), 0, struPreviewInV11.struStreamSever.szIP, 0, smsIp.length());
         struPreviewInV11.struStreamSever.wPort = Short.parseShort(hikIsupProperties.getSmsServer().getPort()); //流媒体服务器端口，需要跟服务器启动监听端口一致
         struPreviewInV11.write();
         //预览请求
         NET_EHOME_PREVIEWINFO_OUT struPreviewOut = new NET_EHOME_PREVIEWINFO_OUT();
         boolean getRS = hcisupcms.NET_ECMS_StartGetRealStreamV11(device.getLoginId(), struPreviewInV11, struPreviewOut);
         log.info("NET_ECMS_StartGetRealStream 预览请求: {}", getRS);
-        if (!hcisupcms.NET_ECMS_StartGetRealStreamV11(device.getLoginId(), struPreviewInV11, struPreviewOut)) {
+        if (!getRS) {
             log.error("NET_ECMS_StartGetRealStream failed, error code: {}", hcisupcms.NET_ECMS_GetLastError());
         } else {
             struPreviewOut.read();
@@ -202,18 +186,15 @@ public class MediaStreamServiceImpl implements IMediaStreamService {
         }
     }
 
-    @Async
     @Override
     public void playbackByTime(String streamKey, Integer loginId, Integer channelId, String startTime, String endTime) {
         if (channelId == null) return;
 
         // 防重复：如果该设备已在预览或已有RTP服务，直接返回
-        if (playbackLatchMap.containsKey(streamKey) || StreamManager.playbackDeviceRTP.containsKey(streamKey)) {
+        if (StreamManager.playbackDeviceRTP.containsKey(streamKey)) {
             log.info("通道已在预览中，忽略重复开启: {}", streamKey);
             return;
         }
-        CountDownLatch latch = new CountDownLatch(1);
-        playbackLatchMap.put(streamKey, latch);
 
         NET_EHOME_PLAYBACK_INFO_IN m_struPlayBackInfoIn = new NET_EHOME_PLAYBACK_INFO_IN();
         m_struPlayBackInfoIn.read();
@@ -292,14 +273,7 @@ public class MediaStreamServiceImpl implements IMediaStreamService {
             log.info("NET_ECMS_StartPushRealStream succeed, sessionID: {}, 分配RTP端口: {}", lSessionID, rtpPort);
         }
 
-        try {
-            // 阻塞，直到 stopPreview() 调用 latch.countDown()
-            latch.await();
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        } finally {
-            playbackLatchMap.remove(streamKey);
-        }
+
     }
 
     @Override
@@ -345,11 +319,7 @@ public class MediaStreamServiceImpl implements IMediaStreamService {
             zlmApi.mk_rtp_server_release(mkRtpServer);
             StreamManager.playbackDeviceRTP.remove(streamKey);
         }
-        CountDownLatch latch = playbackLatchMap.get(streamKey);
-        if (latch != null) {
-            latch.countDown(); // 唤醒 preview
-            log.info("结束回放实例: {}", streamKey);
-        }
+
     }
 
     @Override
@@ -424,7 +394,8 @@ public class MediaStreamServiceImpl implements IMediaStreamService {
 //        byEncodingType = (byte) (byEncodingType + 1); //这里是将NET_EHOME_DEVICE_INFO.dwAudioEncType跟byEncodingType值对齐，区别见结构体NET_EHOME_DEVICE_INFO和NET_EHOME_TALK_ENCODING_TYPE的定义
         // 语音对讲开启请求的输入参数
         NET_EHOME_VOICE_TALK_IN net_ehome_voice_talk_in = new NET_EHOME_VOICE_TALK_IN();
-        net_ehome_voice_talk_in.struStreamSever.szIP = hikIsupProperties.getVoiceSmsServer().getIp().getBytes();
+        String voiceIp = hikIsupProperties.getVoiceSmsServer().getIp();
+        System.arraycopy(voiceIp.getBytes(), 0, net_ehome_voice_talk_in.struStreamSever.szIP, 0, voiceIp.length());
         net_ehome_voice_talk_in.struStreamSever.wPort = Short.parseShort(hikIsupProperties.getVoiceSmsServer().getPort());
         net_ehome_voice_talk_in.dwVoiceChan = dwVoiceChan; //语音通道号,NVR设备起始通道号为3，dwVoiceChan传6对应nvr的通道4
         net_ehome_voice_talk_in.byEncodingType[0] = byEncodingType;  //跟NVR通道对讲必须带上此参数，ENUM_ENCODING_G722_1 = 1；ENUM_ENCODING_G711_MU = 2 ；ENUM_ENCODING_G711_A = 3

@@ -146,7 +146,8 @@ public class StartedUpRunner implements ApplicationRunner, DisposableBean {
 
         log.info("=========================  开启语音流媒体服务监听  =========================");
         NET_EHOME_LISTEN_VOICETALK_CFG net_ehome_listen_voicetalk_cfg = new NET_EHOME_LISTEN_VOICETALK_CFG();
-        net_ehome_listen_voicetalk_cfg.struIPAdress.szIP = hikIsupProperties.getVoiceSmsServer().getListenIp().getBytes();
+        String voiceListenIp = hikIsupProperties.getVoiceSmsServer().getListenIp();
+        System.arraycopy(voiceListenIp.getBytes(), 0, net_ehome_listen_voicetalk_cfg.struIPAdress.szIP, 0, voiceListenIp.length());
         net_ehome_listen_voicetalk_cfg.struIPAdress.wPort = Short.parseShort(hikIsupProperties.getVoiceSmsServer().getPort());
         net_ehome_listen_voicetalk_cfg.fnNewLinkCB = voiceCallBack;
         net_ehome_listen_voicetalk_cfg.byLinkMode = 0;

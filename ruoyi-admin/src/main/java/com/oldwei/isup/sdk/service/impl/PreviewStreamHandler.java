@@ -65,7 +65,10 @@ public class PreviewStreamHandler implements PREVIEW_DATA_CB {
 
         byte[] dataStream = pPreviewCBMsg.pRecvdata.getByteArray(0, pPreviewCBMsg.dwDataLen);
         if (dataStream != null && dataStream.length > 0) {
-            if (pPreviewCBMsg.byDataType == 2) {
+            if (pPreviewCBMsg.byDataType == 1) {
+                log.info("收到预览系统头数据 (byDataType=1)，长度: {}", pPreviewCBMsg.dwDataLen);
+            }
+            if (pPreviewCBMsg.byDataType == 1 || pPreviewCBMsg.byDataType == 2) {
                 int dwBufSize = pPreviewCBMsg.dwDataLen;
                 Pointer pBuffer = pPreviewCBMsg.pRecvdata;
                 byte[] rtpPacket = new byte[1456];

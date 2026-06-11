@@ -1,6 +1,7 @@
 package com.oldwei.isup.model.tts;
 
 import lombok.AllArgsConstructor;
+import lombok.NoArgsConstructor;
 import lombok.Data;
 
 import java.io.Serial;
@@ -8,6 +9,7 @@ import java.io.Serializable;
 
 @Data
 @AllArgsConstructor
+@NoArgsConstructor
 public class DataItem implements Serializable {
     @Serial
     private static final long serialVersionUID = -3572278952302040034L;
