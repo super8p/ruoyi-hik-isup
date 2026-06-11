@@ -1,0 +1,20 @@
+<EventNotificationAlert version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">
+<ipAddress>192.168.1.130</ipAddress>
+<ipv6Address></ipv6Address>
+<portNo>8660</portNo>
+<protocol>EHome</protocol>
+<macAddress>8c:22:d2:20:3c:14</macAddress>
+<channelID>1</channelID>
+<dateTime>2026-06-11T14:54:20+08:00</dateTime>
+<activePostCount>1</activePostCount>
+<eventType>VMD</eventType>
+<eventDescription>Motion alarm</eventDescription>
+<eventState>active</eventState>
+<DetectionRegionList>
+</DetectionRegionList>
+<channelName>Camera 01</channelName>
+<deviceID>GV5266642</deviceID>
+<detectionPicturesNumber>1</detectionPicturesNumber>
+<bkgURL>/pic?AFDE378C01E2D4660B5400565D93B159</bkgURL>
+<URLCertificationType>no</URLCertificationType>
+</EventNotificationAlert>
