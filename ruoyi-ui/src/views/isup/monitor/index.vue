@@ -45,6 +45,17 @@
               - {{ selectedDevice ? selectedDevice.deviceId : '请选择通道' }}
             </h3>
             <div class="mode-switch" style="display: flex; gap: 10px; align-items: center;">
+              <el-button
+                v-if="playMode === 'live'"
+                :type="isIntercomActive ? 'danger' : 'success'"
+                size="small"
+                :icon="isIntercomActive ? Mute : Mic"
+                @click="toggleIntercom"
+                :disabled="!selectedChannel"
+                :loading="connectingIntercom"
+              >
+                {{ isIntercomActive ? '关闭对讲' : '语音对讲' }}
+              </el-button>
               <el-radio-group v-model="streamType" size="small" @change="handleStreamTypeChange">
                 <el-radio-button label="flv">HTTP-FLV</el-radio-button>
                 <el-radio-button label="webrtc">WebRTC</el-radio-button>
@@ -94,11 +105,6 @@
             </el-button>
           </div>
 
-          <!-- 流地址与状态调试 -->
-          <div class="stream-info-debug" v-if="debugInfo">
-            <p><strong>FLV URL:</strong> {{ debugInfo.httpFlv }}</p>
-            <p><strong>WebRTC URL:</strong> {{ debugInfo.webrtc }}</p>
-          </div>
         </div>
       </el-col>
 
@@ -170,8 +176,10 @@ import {
   VideoPlay, 
   Loading, 
   Mic,
+  Mute,
   BellFilled 
 } from '@element-plus/icons-vue';
+import { resampleAndEncodeToAlaw } from '@/utils/audioTranscoder';
 
 // 页面数据
 const devices = ref([]);
@@ -190,6 +198,14 @@ const playbackTimeRange = ref([]);
 const ttsText = ref('检测到烟雾，请尽快撤离！');
 const sendingTts = ref(false);
 const videoRef = ref(null);
+
+// 对讲状态与变量
+const isIntercomActive = ref(false);
+const connectingIntercom = ref(false);
+let talkWs = null;
+let audioContext = null;
+let mediaStream = null;
+let scriptProcessor = null;
 
 // WebRTC 状态
 let peerConnection = null;
@@ -271,6 +287,7 @@ const handleStreamTypeChange = () => {
 
 // 关闭当前流连接
 const closeStream = () => {
+  stopIntercom();
   if (peerConnection) {
     peerConnection.close();
     peerConnection = null;
@@ -291,6 +308,133 @@ const closeStream = () => {
     videoRef.value.src = '';
   }
   loading.value = false;
+};
+
+// 语音对讲逻辑
+const toggleIntercom = async () => {
+  if (isIntercomActive.value) {
+    stopIntercom();
+  } else {
+    await startIntercom();
+  }
+};
+
+const startIntercom = async () => {
+  if (!selectedDevice.value) {
+    ElMessage.warning('请先选择设备通道');
+    return;
+  }
+  connectingIntercom.value = true;
+  try {
+    // 1. 请求麦克风权限
+    mediaStream = await navigator.mediaDevices.getUserMedia({ 
+      audio: {
+        echoCancellation: true, // 回声消除
+        noiseSuppression: true, // 降噪
+        autoGainControl: true    // 自动增益控制
+      } 
+    });
+
+    // 2. 建立 WebSocket 对讲连接
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.host;
+    const wsUrl = `${protocol}//${host}/dev-api/api/devices/${selectedDevice.value.deviceId}/talk`;
+    
+    talkWs = new WebSocket(wsUrl);
+    talkWs.binaryType = 'arraybuffer';
+
+    talkWs.onmessage = (event) => {
+      if (event.data === 'READY') {
+        startAudioCapture();
+        isIntercomActive.value = true;
+        connectingIntercom.value = false;
+        ElNotification({
+          title: '对讲已接通',
+          message: '现在可以通过麦克风开始对讲了',
+          type: 'success',
+          duration: 3000
+        });
+      }
+    };
+
+    talkWs.onclose = (e) => {
+      stopIntercom();
+      if (e.reason) {
+        ElMessage.warning(`对讲关闭: ${e.reason}`);
+      } else {
+        ElMessage.warning('对讲连接已断开');
+      }
+    };
+
+    talkWs.onerror = (err) => {
+      console.error('WebSocket talk error:', err);
+      stopIntercom();
+    };
+
+  } catch (error) {
+    console.error('开启麦克风或建立连接失败:', error);
+    ElMessage.error('开启对讲失败: ' + (error.message || '麦克风权限被拒绝'));
+    stopIntercom();
+  }
+};
+
+const startAudioCapture = () => {
+  audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  const source = audioContext.createMediaStreamSource(mediaStream);
+  
+  scriptProcessor = audioContext.createScriptProcessor(2048, 1, 1);
+  const inputSampleRate = audioContext.sampleRate;
+
+  let audioQueue = [];
+
+  scriptProcessor.onaudioprocess = (event) => {
+    if (!isIntercomActive.value || talkWs?.readyState !== WebSocket.OPEN) return;
+    
+    const inputData = event.inputBuffer.getChannelData(0);
+    // 降采样并转码为 G.711A
+    const alawBuffer = resampleAndEncodeToAlaw(inputData, inputSampleRate, 8000);
+    
+    // 放入缓冲队列
+    for (let i = 0; i < alawBuffer.length; i++) {
+      audioQueue.push(alawBuffer[i]);
+    }
+
+    // G.711A 每 20ms 发送 160 字节
+    const packetSize = 160;
+    while (audioQueue.length >= packetSize) {
+      const packet = new Uint8Array(audioQueue.splice(0, packetSize));
+      talkWs.send(packet.buffer);
+    }
+  };
+
+  source.connect(scriptProcessor);
+  scriptProcessor.connect(audioContext.destination);
+};
+
+const stopIntercom = () => {
+  isIntercomActive.value = false;
+  connectingIntercom.value = false;
+
+  if (scriptProcessor) {
+    scriptProcessor.disconnect();
+    scriptProcessor = null;
+  }
+  if (audioContext) {
+    try {
+      audioContext.close();
+    } catch (e) {}
+    audioContext = null;
+  }
+  if (mediaStream) {
+    mediaStream.getTracks().forEach(track => track.stop());
+    mediaStream = null;
+  }
+  if (talkWs) {
+    try {
+      talkWs.close();
+    } catch (e) {}
+    talkWs = null;
+  }
 };
 
 // FLV 播放逻辑

@@ -32,8 +32,8 @@ export default defineConfig(({ mode, command }) => {
         // https://cn.vitejs.dev/config/#server-proxy
         '/dev-api': {
           target: 'http://localhost:8080',
-          // target: 'https://api.wzs.pub/mock/13',
           changeOrigin: true,
+          ws: true,
           rewrite: (p) => p.replace(/^\/dev-api/, '')
         }
       }
