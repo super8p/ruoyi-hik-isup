@@ -14,6 +14,9 @@ import org.springframework.web.bind.annotation.*;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 import java.net.URLDecoder;
+import com.aizuda.zlm4j.core.ZLMApi;
+import com.aizuda.zlm4j.callback.IMKWebRtcGetAnwerSdpCallBack;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * 流媒体控制接口（预览、回放）
@@ -27,6 +30,8 @@ public class StreamController {
     private final IMediaStreamService mediaStreamService;
     private final DeviceCacheService deviceCacheService;
     private final HikStreamProperties hikStreamProperties;
+    private final ZLMApi zlmApi;
+    private final java.util.Set<Object> callbackKeepAlive = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     /**
      * 开始实时预览
@@ -220,28 +225,62 @@ public class StreamController {
             sdp = "";
         }
         try {
-            String decodedTargetUrl = URLDecoder.decode(targetUrl, StandardCharsets.UTF_8);
-            cn.hutool.http.HttpResponse resp = cn.hutool.http.HttpRequest.post(decodedTargetUrl)
-                    .timeout(30000)
-                    .header("Content-Type", "text/plain; charset=utf-8")
-                    .body(sdp)
-                    .execute();
-
-            String body = resp.body();
-            if (resp.getStatus() != 200) {
-                return R.fail("流媒体服务请求失败，HTTP 状态码: " + resp.getStatus() + ", 响应: " + body);
+            String decodedTargetUrl = URLDecoder.decode(targetUrl, StandardCharsets.UTF_8.name());
+            log.info("webrtcSdp proxy, targetUrl={}, decodedTargetUrl={}", targetUrl, decodedTargetUrl);
+            
+            // 解析 targetUrl 获取 app, stream, type 参数
+            java.net.URI uri = new java.net.URI(decodedTargetUrl);
+            String query = uri.getQuery();
+            String app = "live";
+            String stream = "";
+            String type = "play";
+            if (query != null) {
+                String[] pairs = query.split("&");
+                for (String pair : pairs) {
+                    int idx = pair.indexOf("=");
+                    if (idx > 0) {
+                        String key = pair.substring(0, idx);
+                        String value = pair.substring(idx + 1);
+                        if ("app".equalsIgnoreCase(key)) {
+                            app = value;
+                        } else if ("stream".equalsIgnoreCase(key)) {
+                            stream = value;
+                        } else if ("type".equalsIgnoreCase(key)) {
+                            type = value;
+                        }
+                    }
+                }
             }
 
-            if (body != null && body.trim().startsWith("{")) {
-                com.alibaba.fastjson2.JSONObject json = com.alibaba.fastjson2.JSON.parseObject(body);
-                if (json.containsKey("sdp")) {
-                    return R.ok(json.getString("sdp"));
+            // 拼接 ZLM 内部 RTC URL 格式
+            String rtcUrl = "rtc://__defaultVhost__/" + app + "/" + stream + "?app=" + app + "&stream=" + stream + "&type=" + type;
+            log.info("webrtcSdp JNA calling, app={}, stream={}, type={}, rtcUrl={}", app, stream, type, rtcUrl);
+
+            CompletableFuture<String> future = new CompletableFuture<>();
+            IMKWebRtcGetAnwerSdpCallBack callback = new IMKWebRtcGetAnwerSdpCallBack() {
+                @Override
+                public void invoke(com.sun.jna.Pointer user_data, String answer_sdp, String err) {
+                    try {
+                        if (err != null && !err.isEmpty()) {
+                            log.error("JNA WebRTC SDP callback error: {}", err);
+                            future.completeExceptionally(new RuntimeException(err));
+                        } else {
+                            log.info("JNA WebRTC SDP callback succeed, answerSdp length: {}", answer_sdp != null ? answer_sdp.length() : 0);
+                            future.complete(answer_sdp);
+                        }
+                    } catch (Exception e) {
+                        future.completeExceptionally(e);
+                    } finally {
+                        callbackKeepAlive.remove(this);
+                    }
                 }
-                if (json.containsKey("code") && json.getIntValue("code") != 0) {
-                    return R.fail("流媒体服务返回错误: " + json.getString("msg"));
-                }
-            }
-            return R.ok(body);
+            };
+
+            callbackKeepAlive.add(callback);
+            zlmApi.mk_webrtc_get_answer_sdp(null, callback, type, sdp, rtcUrl);
+
+            String answerSdp = future.get(10, java.util.concurrent.TimeUnit.SECONDS);
+            return R.ok("操作成功", answerSdp);
         } catch (Exception e) {
             log.error("webrtc sdp proxy failed, targetUrl={}", targetUrl, e);
             return R.fail("代理 WebRTC SDP 请求异常: " + e.getMessage());
