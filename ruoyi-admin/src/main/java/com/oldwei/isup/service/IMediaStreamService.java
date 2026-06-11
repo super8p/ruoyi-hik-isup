@@ -18,4 +18,8 @@ public interface IMediaStreamService {
     void stopPlayBackByTime(String deviceId, Integer loginId, Integer channelId);
 
     void voiceTrans(Integer loginId, String fileFullPath);
+
+    int startVoiceIntercom(Integer loginId, int channelId, byte byEncodingType);
+
+    void stopVoiceIntercom(Integer loginId, int sessionId, int lVoiceLinkHandle);
 }

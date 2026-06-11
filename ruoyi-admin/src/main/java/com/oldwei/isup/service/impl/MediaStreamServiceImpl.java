@@ -497,4 +497,53 @@ public class MediaStreamServiceImpl implements IMediaStreamService {
         }
         log.info("NET_ESTREAM_StopVoiceTalk success!");
     }
+
+    @Override
+    public int startVoiceIntercom(Integer loginId, int channelId, byte byEncodingType) {
+        NET_EHOME_VOICE_TALK_IN netIn = new NET_EHOME_VOICE_TALK_IN();
+        String voiceIp = hikIsupProperties.getVoiceSmsServer().getIp();
+        System.arraycopy(voiceIp.getBytes(), 0, netIn.struStreamSever.szIP, 0, voiceIp.length());
+        netIn.struStreamSever.wPort = Short.parseShort(hikIsupProperties.getVoiceSmsServer().getPort());
+        netIn.dwVoiceChan = channelId;
+        netIn.byEncodingType[0] = byEncodingType;
+        netIn.write();
+
+        NET_EHOME_VOICE_TALK_OUT netOut = new NET_EHOME_VOICE_TALK_OUT();
+        if (!hcisupcms.NET_ECMS_StartVoiceWithStmServer(loginId, netIn, netOut)) {
+            log.error("NET_ECMS_StartVoiceWithStmServer failed, error: {}", hcisupcms.NET_ECMS_GetLastError());
+            return -1;
+        }
+        netOut.read();
+
+        NET_EHOME_PUSHVOICE_IN pushIn = new NET_EHOME_PUSHVOICE_IN();
+        pushIn.dwSize = pushIn.size();
+        pushIn.lSessionID = netOut.lSessionID;
+        pushIn.write();
+
+        NET_EHOME_PUSHVOICE_OUT pushOut = new NET_EHOME_PUSHVOICE_OUT();
+        pushOut.dwSize = pushOut.size();
+        pushOut.write();
+
+        if (!hcisupcms.NET_ECMS_StartPushVoiceStream(loginId, pushIn, pushOut)) {
+            log.error("NET_ECMS_StartPushVoiceStream failed, error: {}", hcisupcms.NET_ECMS_GetLastError());
+            hcisupcms.NET_ECMS_StopVoiceTalkWithStmServer(loginId, netOut.lSessionID);
+            return -1;
+        }
+        return netOut.lSessionID;
+    }
+
+    @Override
+    public void stopVoiceIntercom(Integer loginId, int sessionId, int lVoiceLinkHandle) {
+        if (lVoiceLinkHandle >= 0) {
+            if (!hikISUPStream.NET_ESTREAM_StopVoiceTalk(lVoiceLinkHandle)) {
+                log.error("NET_ESTREAM_StopVoiceTalk failed, error code: {}", hikISUPStream.NET_ESTREAM_GetLastError());
+            }
+        }
+        if (sessionId != -1) {
+            if (!hcisupcms.NET_ECMS_StopVoiceTalkWithStmServer(loginId, sessionId)) {
+                log.error("NET_ECMS_StopVoiceTalkWithStmServer failed, error code: {}", hcisupcms.NET_ECMS_GetLastError());
+            }
+        }
+        log.info("stopVoiceIntercom success! sessionId={}, lVoiceLinkHandle={}", sessionId, lVoiceLinkHandle);
+    }
 }

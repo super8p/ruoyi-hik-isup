@@ -119,6 +119,12 @@
             <artifactId>mysql-connector-j</artifactId>
         </dependency>
 
+        <!-- WebSocket -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
+
         <!-- 鏍稿績妯″潡-->
         <dependency>
             <groupId>com.ruoyi</groupId>
