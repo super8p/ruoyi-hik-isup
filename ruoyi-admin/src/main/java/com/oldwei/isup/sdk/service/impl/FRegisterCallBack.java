@@ -1,6 +1,7 @@
 package com.oldwei.isup.sdk.service.impl;
 
 import com.oldwei.isup.config.HikIsupProperties;
+import com.oldwei.isup.config.HikPlatformProperties;
 import com.oldwei.isup.model.Device;
 import com.oldwei.isup.sdk.isapi.ISAPIService;
 import com.oldwei.isup.sdk.service.DEVICE_REGISTER_CB;
@@ -11,6 +12,8 @@ import com.oldwei.isup.sdk.structure.NET_EHOME_DEV_REG_INFO_V12;
 import com.oldwei.isup.sdk.structure.NET_EHOME_DEV_SESSIONKEY;
 import com.oldwei.isup.sdk.structure.NET_EHOME_SERVER_INFO_V50;
 import com.oldwei.isup.service.DeviceCacheService;
+import com.oldwei.isup.service.IMediaStreamService;
+import com.oldwei.isup.sdk.StreamManager;
 import com.sun.jna.Pointer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,11 +26,13 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class FRegisterCallBack implements DEVICE_REGISTER_CB {
     private final HikIsupProperties hikIsupProperties;
+    private final HikPlatformProperties hikPlatformProperties;
     private final HCISUPCMS hcisupcms;
     private final DeviceCacheService deviceCacheService;
     private final IHikISUPAlarm hikISUPAlarm;
     private final ISAPIService isapiService;
     private final CmsUtil cmsUtil;
+    private final IMediaStreamService mediaStreamService;
 
     @Override
     public boolean invoke(int lUserID, int dwDataType, Pointer pOutBuffer, int dwOutLen, Pointer pInBuffer, int dwInLen, Pointer pUser) {
@@ -118,6 +123,7 @@ public class FRegisterCallBack implements DEVICE_REGISTER_CB {
                 // 更新通道列表
 //                updateDeviceChannels(device, onlineChannelIds);
                 deviceCacheService.saveOrUpdate(device);
+                notifyXiaoanOnlineStatus(deviceId, "online");
                 break;
             case EHOME_REGISTER_TYPE.ENUM_DEV_OFF:// TODO 1
                 log.info("设备下线回调 Device off, lUserID is: {}", lUserID);
@@ -126,9 +132,32 @@ public class FRegisterCallBack implements DEVICE_REGISTER_CB {
                     log.warn("未找到登录句柄{}对应的设备", lUserID);
                 } else {
                     Device deviceOffline = deviceOpt.get();
+                    log.info("设备{}下线，影响{}个通道，开始清理该设备的所有流媒体资源", deviceOffline.getDeviceId(), deviceOffline.getChannels().size());
+                    
+                    // 遍历所有可能的通道ID(0-99)，如果在StreamManager中存在相关的活跃会话，则主动执行清理操作
+                    for (int channelId = 0; channelId < 100; channelId++) {
+                        int key = lUserID * 100 + channelId;
+                        if (StreamManager.userIDandSessionMap.containsKey(key)) {
+                            try {
+                                log.info("发现未清理的活跃预览流: 设备Id={}, 通道Id={}, 执行自动断开...", deviceOffline.getDeviceId(), channelId);
+                                mediaStreamService.stopPreview(deviceOffline, channelId);
+                            } catch (Exception e) {
+                                log.error("自动停止设备{}通道{}预览发生异常", deviceOffline.getDeviceId(), channelId, e);
+                            }
+                        }
+                        if (StreamManager.playbackUserIDandSessionMap.containsKey(key)) {
+                            try {
+                                log.info("发现未清理的活跃回放流: 设备Id={}, 通道Id={}, 执行自动断开...", deviceOffline.getDeviceId(), channelId);
+                                mediaStreamService.stopPlayBackByTime(deviceOffline.getDeviceId(), lUserID, channelId);
+                            } catch (Exception e) {
+                                log.error("自动停止设备{}通道{}回放发生异常", deviceOffline.getDeviceId(), channelId, e);
+                            }
+                        }
+                    }
+
                     deviceCacheService.removeByLoginId(lUserID);
-                    log.info("设备{}下线，影响{}个通道", deviceOffline.getDeviceId(), deviceOffline.getChannels().size());
-                    // TODO 如果设备正在预览，停止该设备的所有预览流
+                    log.info("设备{}下线清理完成", deviceOffline.getDeviceId());
+                    notifyXiaoanOnlineStatus(deviceOffline.getDeviceId(), "offline");
                 }
                 break;
             case EHOME_REGISTER_TYPE.ENUM_DEV_AUTH:// 3
@@ -175,5 +204,28 @@ public class FRegisterCallBack implements DEVICE_REGISTER_CB {
                 break;
         }
         return true;
+    }
+
+    public void notifyXiaoanOnlineStatus(String deviceId, String event) {
+        if (hikPlatformProperties == null) {
+            return;
+        }
+        String xiaoanUrl = hikPlatformProperties.getXiaoanNotifyUrl();
+        if (org.apache.commons.lang3.StringUtils.isBlank(xiaoanUrl) || org.apache.commons.lang3.StringUtils.isBlank(deviceId)) {
+            return;
+        }
+        String targetUrl = xiaoanUrl + "/onOrOffLine";
+        java.util.Map<String, Object> payload = new java.util.HashMap<>();
+        payload.put("Event", event);
+        
+        java.util.Map<String, Object> deviceInfo = new java.util.HashMap<>();
+        deviceInfo.put("SerialNum", deviceId);
+        deviceInfo.put("Name", deviceId);
+        payload.put("DeviceInfo", deviceInfo);
+        
+        com.oldwei.isup.util.WebFluxHttpUtil.postAsync(targetUrl, payload, String.class).subscribe(
+            resp -> log.info("Xiaoan onOrOffLine notification success ({}): {}", event, resp),
+            err -> log.error("Xiaoan onOrOffLine notification error ({}): {}", event, err.getMessage())
+        );
     }
 }

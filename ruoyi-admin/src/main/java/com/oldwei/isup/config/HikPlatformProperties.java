@@ -12,5 +12,6 @@ public class HikPlatformProperties {
     private String pushAddress;
     private String ttsServer;
     private String ffmpegPath;
+    private String xiaoanNotifyUrl;
 
 }

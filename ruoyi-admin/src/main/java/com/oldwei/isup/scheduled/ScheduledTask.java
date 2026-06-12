@@ -6,6 +6,7 @@ import com.oldwei.isup.model.xml.InputProxyChannelStatusList;
 import com.oldwei.isup.model.xml.PpvspMessage;
 import com.oldwei.isup.sdk.isapi.ISAPIService;
 import com.oldwei.isup.sdk.service.impl.CmsUtil;
+import com.oldwei.isup.sdk.service.impl.FRegisterCallBack;
 import com.oldwei.isup.service.DeviceCacheService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +27,7 @@ public class ScheduledTask {
     private final CmsUtil cmsUtil;
     private final DeviceCacheService deviceCacheService;
     private final ISAPIService isapiService;
+    private final FRegisterCallBack fRegisterCallBack;
 
     // Cron表达式范例：
     //
@@ -213,5 +215,29 @@ public class ScheduledTask {
             log.error("获取设备通道失败，设备类型: {}", deviceType, e);
         }
         return Collections.emptyList();
+    }
+
+    /**
+     * 每分钟向消安平台发送一次所有在线设备的心跳保活
+     */
+    @Scheduled(cron = "0 */1 * * * ?")
+    public void keepAliveToXiaoan() {
+        List<Device> onlineDevices = deviceCacheService.listAll().stream()
+                .filter(d -> d.getLoginId() != null && d.getLoginId() > -1)
+                .collect(Collectors.toList());
+        
+        if (onlineDevices.isEmpty()) {
+            log.debug("没有在线设备，无需发送保活心跳到消安");
+            return;
+        }
+
+        log.info("开始发送保活心跳到消安，在线设备数: {}", onlineDevices.size());
+        for (Device device : onlineDevices) {
+            try {
+                fRegisterCallBack.notifyXiaoanOnlineStatus(device.getDeviceId(), "online");
+            } catch (Exception e) {
+                log.error("向消安发送设备 {} 保活心跳失败", device.getDeviceId(), e);
+            }
+        }
     }
 }

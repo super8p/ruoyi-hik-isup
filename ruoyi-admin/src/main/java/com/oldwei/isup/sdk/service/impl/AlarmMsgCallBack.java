@@ -17,6 +17,7 @@ import com.oldwei.isup.util.XmlUtil;
 import com.sun.jna.Pointer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
@@ -25,6 +26,10 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class AlarmMsgCallBack implements EHomeMsgCallBack {
     private final HikPlatformProperties hikPlatformProperties;
+    private final com.oldwei.isup.config.HikIsupProperties hikIsupProperties;
+
+    @org.springframework.beans.factory.annotation.Value("${server.port:8080}")
+    private int serverPort;
 
     @Override
     public boolean invoke(int iHandle, NET_EHOME_ALARM_MSG pAlarmMsg, Pointer pUser) {
@@ -84,6 +89,12 @@ public class AlarmMsgCallBack implements EHomeMsgCallBack {
                                     }, error -> {
                                         log.error("推送到 {} 失败：{}", pushPath, error.getMessage());
                                     });
+                                    String eventType = eventNotificationAlert.getEventType();
+                                    if ("offDuty".equals(eventType) || "fireSmartFireDetect".equals(eventType) || "fireSmartSmokeDetect".equals(eventType) || "smokeAlarm".equals(eventType)) {
+                                        pushToXiaoan(eventNotificationAlert.getDeviceID(), "active", null, eventType);
+                                    } else if ("backDuty".equals(eventType) || "FirePointAlarmRecovery".equals(eventType) || "SmokeAlarmRecovery".equals(eventType)) {
+                                        pushToXiaoan(eventNotificationAlert.getDeviceID(), "inactive", null, eventType);
+                                    }
                                 }
                             } catch (Exception e) {
                                 // 或者使用日志记录
@@ -92,6 +103,38 @@ public class AlarmMsgCallBack implements EHomeMsgCallBack {
                         } else if (StringUtils.equals("2", dataType)) {
                             try {
                                 DeviceEventBase event = DeviceEventParser.parse(data);
+                                if (event != null) {
+                                    String eventType = event.getEventType();
+                                    String pictureUrl = null;
+                                    try {
+                                        JsonNode rootNode = mapper.readTree(data);
+                                        String picPath = "";
+                                        if (rootNode.has("RecognizeResult") && rootNode.get("RecognizeResult").has("imageURL")) {
+                                            picPath = rootNode.get("RecognizeResult").get("imageURL").asText();
+                                        } else if (rootNode.has("BackDuty") && rootNode.get("BackDuty").has("capturePicture") && rootNode.get("BackDuty").get("capturePicture").has("resourcesContent")) {
+                                            picPath = rootNode.get("BackDuty").get("capturePicture").get("resourcesContent").asText();
+                                        } else if (rootNode.has("FirePointAlarmRecovery") && rootNode.get("FirePointAlarmRecovery").has("capturePicture") && rootNode.get("FirePointAlarmRecovery").get("capturePicture").has("resourcesContent")) {
+                                            picPath = rootNode.get("FirePointAlarmRecovery").get("capturePicture").get("resourcesContent").asText();
+                                        } else if (rootNode.has("SmokeAlarmRecovery") && rootNode.get("SmokeAlarmRecovery").has("capturePicture") && rootNode.get("SmokeAlarmRecovery").get("capturePicture").has("resourcesContent")) {
+                                            picPath = rootNode.get("SmokeAlarmRecovery").get("capturePicture").get("resourcesContent").asText();
+                                        }
+                                        if (StringUtils.isNotBlank(picPath)) {
+                                            String hash = picPath;
+                                            if (picPath.contains("?")) {
+                                                hash = picPath.substring(picPath.indexOf("?") + 1);
+                                            }
+                                            pictureUrl = "http://" + hikIsupProperties.getPicServer().getIp() + ":" + serverPort + "/pic?" + hash;
+                                        }
+                                    } catch (Exception ex) {
+                                        log.error("提取告警图片失败: {}", ex.getMessage());
+                                    }
+
+                                    if ("offDuty".equals(eventType) || "fireSmartFireDetect".equals(eventType) || "fireSmartSmokeDetect".equals(eventType) || "smokeAlarm".equals(eventType)) {
+                                        pushToXiaoan(event.getDeviceID(), "active", pictureUrl, eventType);
+                                    } else if ("backDuty".equals(eventType) || "FirePointAlarmRecovery".equals(eventType) || "SmokeAlarmRecovery".equals(eventType)) {
+                                        pushToXiaoan(event.getDeviceID(), "inactive", pictureUrl, eventType);
+                                    }
+                                }
                                 if (event instanceof FaceCaptureEvent faceEvent) {
                                     uploadData.setDataType("FaceCapture");
                                     // 序列化为 JSON 字符串
@@ -111,7 +154,7 @@ public class AlarmMsgCallBack implements EHomeMsgCallBack {
 //                                    log.info("AlarmResultEvent 上报：{}", jsonString);
                                     uploadData.setData(jsonString);
                                 } else {
-                                    log.info("未知事件类型：{}", event.getEventType());
+                                    log.info("未知事件类型：{}", event != null ? event.getEventType() : "null");
                                     String jsonString = mapper.writeValueAsString(event);
                                     uploadData.setDataType(jsonString);
                                 }
@@ -133,6 +176,45 @@ public class AlarmMsgCallBack implements EHomeMsgCallBack {
             }
         }
         return true;
+    }
+
+    private void pushToXiaoan(String devId, String evState, String pictureUrl, String eventType) {
+        String xiaoanUrl = hikPlatformProperties.getXiaoanNotifyUrl();
+        if (StringUtils.isBlank(xiaoanUrl) || StringUtils.isBlank(devId)) {
+            return;
+        }
+        if (StringUtils.isBlank(evState) || "active".equalsIgnoreCase(evState)) {
+            String targetUrl = xiaoanUrl + "/warning";
+            java.util.Map<String, Object> payload = new java.util.HashMap<>();
+            payload.put("DeviceId", devId);
+            if (StringUtils.isNotBlank(pictureUrl)) {
+                payload.put("PictureUrl", pictureUrl);
+            }
+            if (StringUtils.isNotBlank(eventType)) {
+                payload.put("AlarmType", eventType);
+            }
+            WebFluxHttpUtil.postAsync(targetUrl, payload, String.class).subscribe(
+                resp -> log.info("Xiaoan warning notification success: {}", resp),
+                err -> log.error("Xiaoan warning notification error: {}", err.getMessage())
+            );
+        } else if ("inactive".equalsIgnoreCase(evState)) {
+            String targetUrl = xiaoanUrl + "/warningComplete";
+            java.util.Map<String, Object> payload = new java.util.HashMap<>();
+            payload.put("DeviceId", devId);
+            if (StringUtils.isNotBlank(pictureUrl)) {
+                payload.put("PictureUrl", pictureUrl);
+            }
+            if (StringUtils.isNotBlank(eventType)) {
+                payload.put("AlarmType", eventType);
+            }
+            java.util.Map<String, Object> taskInfo = new java.util.HashMap<>();
+            taskInfo.put("State", "finished");
+            payload.put("TaskInfo", taskInfo);
+            WebFluxHttpUtil.postAsync(targetUrl, payload, String.class).subscribe(
+                resp -> log.info("Xiaoan warningComplete notification success: {}", resp),
+                err -> log.error("Xiaoan warningComplete notification error: {}", err.getMessage())
+            );
+        }
     }
 }
 

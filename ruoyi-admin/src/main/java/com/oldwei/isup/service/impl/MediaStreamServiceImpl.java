@@ -80,11 +80,9 @@ public class MediaStreamServiceImpl implements IMediaStreamService {
 
         if (!hikISUPStream.NET_ESTREAM_StopPreview(previewHandleId)) {
             log.error("NET_ESTREAM_StopPreview failed,err = {}", hikISUPStream.NET_ESTREAM_GetLastError());
-            return;
         }
         if (!hcisupcms.NET_ECMS_StopGetRealStream(loginId, sessionId)) {
             log.error("NET_ECMS_StopGetRealStream failed,err = {}", hcisupcms.NET_ECMS_GetLastError());
-            return;
         }
         // 释放RTP端口
         Integer rtpPort = StreamManager.sessionIDAndRtpPortMap.remove(sessionId);
@@ -305,11 +303,9 @@ public class MediaStreamServiceImpl implements IMediaStreamService {
 
         if (!hikISUPStream.NET_ESTREAM_StopPlayBack(lPreviewHandle)) {
             System.out.println("NET_ESTREAM_StopPlayBack failed,err = " + hikISUPStream.NET_ESTREAM_GetLastError());
-            return;
         }
         if (!hcisupcms.NET_ECMS_StopPlayBack(loginId, lSessionID)) {
             System.out.println("NET_ECMS_StopPlayBack failed,err = " + hcisupcms.NET_ECMS_GetLastError());
-            return;
         }
         Integer rtpPort = StreamManager.playbackSessionIDAndRtpPortMap.remove(lSessionID);
         if (rtpPort != null) {

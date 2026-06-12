@@ -17,7 +17,7 @@ public class ZLMApiServiceConfig {
     public ZLMApi zlmApi() {
         ZLMApi zlmApi = Native.load("mk_api", ZLMApi.class);
         //初始化zmk服务器
-        zlmApi.mk_env_init2(1, 1, 1, null, 0, 0, null, 0, null, "hik12345");
+        zlmApi.mk_env_init2(1, 4, 1, null, 0, 0, null, 0, null, "hik12345");
         //创建http服务器 0:失败,非0:端口号
         short httpPort = zlmApi.mk_http_server_start((short) 7788, 0);
         //创建rtsp服务器 0:失败,非0:端口号

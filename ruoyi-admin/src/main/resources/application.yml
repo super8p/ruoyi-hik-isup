@@ -149,9 +149,10 @@ xss:
 # 海康 ISUP / 流媒体相关配置
 hik:
   platform:
-    pushAddress: http://192.168.2.47:9080/iot/event/HK/callback
+    pushAddress: http://localhost:9080/iot/event/HK/callback
     ttsServer: http://localhost:3000/api/v1/tts/generateJson
     ffmpegPath: D:\develop\ffmpeg-master-latest-win64-gpl\bin\ffmpeg.exe
+    xiaoanNotifyUrl: http://localhost:8825/api/camera
   stream:
     isSSL: false
     domain: __defaultVhost__

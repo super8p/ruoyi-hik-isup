@@ -107,7 +107,14 @@ public class SecurityConfig {
                             .requestMatchers("/swagger-ui.html", "/v3/api-docs/**", "/swagger-ui/**", "/druid/**")
                             .permitAll()
                             // 除上面外的所有请求全部需要鉴权认证
+                            // 对讲 WebSocket
                             .requestMatchers("/api/devices/*/talk").permitAll()
+                            // 预览、回放、语音 TTS 允许消安后端无鉴权调用
+                             .requestMatchers("/api/devices/*/preview").permitAll()
+                            .requestMatchers("/api/devices/*/playback").permitAll()
+                            .requestMatchers("/api/devices/*/voice/**").permitAll()
+                            .requestMatchers("/api/devices/*/webrtcSdp").permitAll()
+                            .requestMatchers("/pic").permitAll()
                             .anyRequest().authenticated();
                 })
                 // 添加Logout filter
@@ -119,13 +126,19 @@ public class SecurityConfig {
                 .addFilterBefore(corsFilter, LogoutFilter.class)
                 .build();
     }
-
+ 
     /**
      * 忽略 WebSocket 对讲连接的权限拦截
      */
     @Bean
     public org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer webSecurityCustomizer() {
-        return (web) -> web.ignoring().requestMatchers("/api/devices/*/talk");
+        return (web) -> web.ignoring()
+                .requestMatchers("/api/devices/*/talk")
+                .requestMatchers("/api/devices/*/preview")
+                .requestMatchers("/api/devices/*/playback")
+                .requestMatchers("/api/devices/*/voice/**")
+                .requestMatchers("/api/devices/*/webrtcSdp")
+                .requestMatchers("/pic");
     }
 
     /**
