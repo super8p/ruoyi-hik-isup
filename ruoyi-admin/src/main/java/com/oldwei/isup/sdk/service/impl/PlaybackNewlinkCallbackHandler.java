@@ -50,4 +50,17 @@ public class PlaybackNewlinkCallbackHandler implements PLAYBACK_NEWLINK_CB {
         }
         return true;
     }
+
+    /**
+     * 关闭指定句柄的回放流处理器
+     *
+     * @param lPlayBackLinkHandle 回放句柄
+     */
+    public void closePlaybackHandler(int lPlayBackLinkHandle) {
+        PlaybackDataCallback handler = handlerMap.remove(lPlayBackLinkHandle);
+        if (handler != null) {
+            handler.closeAllConnections();
+            log.info("已关闭PlaybackDataCallback，句柄: {}", lPlayBackLinkHandle);
+        }
+    }
 }

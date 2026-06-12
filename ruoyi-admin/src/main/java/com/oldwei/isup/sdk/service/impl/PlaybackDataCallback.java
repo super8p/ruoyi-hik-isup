@@ -40,6 +40,11 @@ public class PlaybackDataCallback implements PLAYBACK_DATA_CB {
 
         // 获取或创建该句柄对应的连接
         PlaybackDataCallback.RtpConnection connection = connectionMap.computeIfAbsent(iPlayBackLinkHandle, handle -> {
+            Integer sessId = StreamManager.playbackPreviewHandSAndSessionIDandMap.get(handle);
+            if (sessId == null) {
+                // 会话已在StreamManager中销毁，停止新建连接
+                return null;
+            }
             PlaybackDataCallback.RtpConnection conn = new PlaybackDataCallback.RtpConnection();
             try {
                 // 使用动态分配的端口
@@ -54,7 +59,9 @@ public class PlaybackDataCallback implements PLAYBACK_DATA_CB {
         });
 
         if (connection == null || connection.rtpOutputStream == null) {
-            log.error("RTP连接不可用，句柄: {}", iPlayBackLinkHandle);
+            if (StreamManager.playbackPreviewHandSAndSessionIDandMap.containsKey(iPlayBackLinkHandle)) {
+                log.error("RTP连接不可用，句柄: {}", iPlayBackLinkHandle);
+            }
             return false;
         }
         
@@ -112,7 +119,12 @@ public class PlaybackDataCallback implements PLAYBACK_DATA_CB {
                             datasize -= useDataSize;
                         }
                     } catch (IOException e) {
-                        log.error("写入RTP数据失败，句柄: {}", iPlayBackLinkHandle, e);
+                        String msg = e.getMessage();
+                        if (msg != null && (msg.contains("Socket closed") || msg.contains("Connection reset") || msg.contains("Broken pipe"))) {
+                            log.info("RTP连接已关闭，停止写入RTP数据，句柄: {}", iPlayBackLinkHandle);
+                        } else {
+                            log.error("写入RTP数据失败，句柄: {}, 原因: {}", iPlayBackLinkHandle, msg);
+                        }
                         // 发生异常时清理该连接
                         closeConnection(iPlayBackLinkHandle);
                     }

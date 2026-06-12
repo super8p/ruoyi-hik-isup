@@ -5,7 +5,7 @@
       <el-col :span="6" class="panel-left">
         <div class="glass-card full-height">
           <div class="panel-header">
-            <h3><i class="el-icon-video-camera"></i> ISUP 设备列表</h3>
+            <h3><i class="el-icon-video-camera"></i> 设备列表</h3>
             <el-button icon="Refresh" circle size="small" @click="fetchDevices" />
           </div>
           <el-scrollbar>
@@ -40,31 +40,9 @@
         <div class="glass-card full-height player-panel">
           <div class="panel-header">
             <h3>
-              <span v-if="playMode === 'live'"><el-badge is-dot type="danger">实时预览</el-badge></span>
-              <span v-else><el-badge is-dot type="warning">历史回放</el-badge></span>
+              <span>实时预览</span>
               - {{ selectedDevice ? selectedDevice.deviceId : '请选择通道' }}
             </h3>
-            <div class="mode-switch" style="display: flex; gap: 10px; align-items: center;">
-              <el-button
-                v-if="playMode === 'live'"
-                :type="isIntercomActive ? 'danger' : 'success'"
-                size="small"
-                :icon="isIntercomActive ? Mute : Mic"
-                @click="toggleIntercom"
-                :disabled="!selectedChannel"
-                :loading="connectingIntercom"
-              >
-                {{ isIntercomActive ? '关闭对讲' : '语音对讲' }}
-              </el-button>
-              <el-radio-group v-model="streamType" size="small" @change="handleStreamTypeChange">
-                <el-radio-button label="flv">HTTP-FLV</el-radio-button>
-                <el-radio-button label="webrtc">WebRTC</el-radio-button>
-              </el-radio-group>
-              <el-radio-group v-model="playMode" size="small" @change="handleModeChange">
-                <el-radio-button label="live">实时</el-radio-button>
-                <el-radio-button label="playback">回放</el-radio-button>
-              </el-radio-group>
-            </div>
           </div>
 
           <!-- 播放器视图 -->
@@ -73,36 +51,78 @@
               id="webrtc-video" 
               ref="videoRef"
               autoplay 
-              controls 
               playsinline
               class="video-player"
+              @volumechange="handleVolumeChange"
             ></video>
             <div v-if="loading" class="video-overlay">
               <el-icon class="is-loading"><Loading /></el-icon>
-              <span v-if="streamType === 'webrtc'">正在获取视频流并进行 WebRTC 握手...</span>
-              <span v-else>正在获取视频流并初始化 FLV 播放器...</span>
+              <span>正在获取视频流并进行 WebRTC 握手...</span>
             </div>
             <div v-if="!selectedChannel && !loading" class="video-overlay placeholder-overlay">
               <el-icon size="48"><VideoPlay /></el-icon>
               <span>选择左侧通道开始播放</span>
             </div>
-          </div>
-
-          <!-- 回放时间控制 -->
-          <div v-if="playMode === 'playback'" class="playback-controls">
-            <el-date-picker
-              v-model="playbackTimeRange"
-              type="datetimerange"
-              range-separator="至"
-              start-placeholder="开始时间"
-              end-placeholder="结束时间"
-              value-format="YYYY-MM-DD HH:mm:ss"
-              size="small"
-              class="time-picker"
-            />
-            <el-button type="warning" size="small" icon="VideoPlay" @click="startPlaybackStream" :disabled="!selectedChannel">
-              启动回放
-            </el-button>
+            <!-- 自定义视频播放控制栏 (仿海康客户端样式) -->
+            <div v-if="selectedChannel && !loading" class="custom-player-controls">
+              <!-- 左侧控件组 -->
+              <div class="controls-left">
+                <!-- 音量控制组（静音+滑块+数字显示） -->
+                <div class="volume-control-container">
+                  <button class="control-btn" @click="toggleMute" :title="isMuted ? '恢复声音' : '静音'">
+                    <svg v-if="isMuted" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M11 5L6 9H2v6h4l5 4V5z"/>
+                      <line x1="23" y1="9" x2="17" y2="15"/>
+                      <line x1="17" y1="9" x2="23" y2="15"/>
+                    </svg>
+                    <svg v-else viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M11 5L6 9H2v6h4l5 4V5z"/>
+                      <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                      <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                    </svg>
+                  </button>
+                  <input 
+                    type="range" 
+                    min="0" 
+                    max="100" 
+                    v-model="volumeVal" 
+                    class="volume-slider" 
+                    @input="handleVolumeSliderInput"
+                    title="音量调节"
+                  />
+                  <span class="volume-text">{{ isMuted ? 0 : volumeVal }}</span>
+                </div>
+                
+                <!-- 截图 -->
+                <button class="control-btn" @click="takeSnapshot" title="视频截图">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                    <circle cx="12" cy="13" r="4"/>
+                  </svg>
+                </button>
+                
+                <!-- 语音对讲 (带高亮框选中样式) -->
+                <button 
+                  class="control-btn talk-btn" 
+                  :class="{ active: isIntercomActive, loading: connectingIntercom }" 
+                  @click="toggleIntercom" 
+                  title="语音对讲"
+                >
+                  <el-icon v-if="connectingIntercom" class="is-loading"><Loading /></el-icon>
+                  <svg v-else viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                    <path d="M19 10v1a7 7 0 0 1-14 0v-1"/>
+                    <line x1="12" y1="18" x2="12" y2="23"/>
+                    <line x1="8" y1="23" x2="16" y2="23"/>
+                  </svg>
+                </button>
+              </div>
+              
+              <!-- 右侧 -->
+              <div class="controls-right">
+                <span class="live-badge">LIVE</span>
+              </div>
+            </div>
           </div>
 
         </div>
@@ -222,7 +242,7 @@ const expandedDevices = ref([]);
 const selectedDevice = ref(null);
 const selectedChannel = ref(null);
 const playMode = ref('live'); // live | playback
-const streamType = ref('flv'); // flv | webrtc
+const streamType = ref('webrtc'); // webrtc only
 const loading = ref(false);
 const debugInfo = ref(null);
 
@@ -239,6 +259,74 @@ const audioGain = ref(1.0); // 增益默认 1.0
 const noiseFilterEnabled = ref(true); // 噪声抑制开关
 const filterFrequency = ref(3000); // 截止频率默认 3000Hz
 
+const isMuted = ref(true); // 默认静音以保证浏览器能够自动播放
+const volumeVal = ref(30); // 默认音量 30%
+
+// 视频静音/恢复音量控制
+const toggleMute = () => {
+  isMuted.value = !isMuted.value;
+  if (videoRef.value) {
+    videoRef.value.muted = isMuted.value;
+    if (!isMuted.value && volumeVal.value === 0) {
+      volumeVal.value = 30;
+    }
+    videoRef.value.volume = isMuted.value ? 0 : volumeVal.value / 100;
+  }
+  if (gainNode) {
+    if (isMuted.value) {
+      gainNode.gain.value = 0;
+    } else {
+      gainNode.gain.value = (volumeVal.value / 100) * audioGain.value;
+    }
+  }
+};
+
+// 拖动音量条修改音量
+const handleVolumeSliderInput = (e) => {
+  const val = parseInt(e.target.value);
+  volumeVal.value = val;
+  if (videoRef.value) {
+    videoRef.value.volume = val / 100;
+    if (val > 0) {
+      videoRef.value.muted = false;
+      isMuted.value = false;
+    } else {
+      videoRef.value.muted = true;
+      isMuted.value = true;
+    }
+  }
+  if (gainNode) {
+    if (isMuted.value) {
+      gainNode.gain.value = 0;
+    } else {
+      gainNode.gain.value = (val / 100) * audioGain.value;
+    }
+  }
+};
+
+
+// 视频截图/快照
+const takeSnapshot = () => {
+  if (!videoRef.value) return;
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = videoRef.value.videoWidth || 1920;
+    canvas.height = videoRef.value.videoHeight || 1080;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(videoRef.value, 0, 0, canvas.width, canvas.height);
+    
+    const dataUrl = canvas.toDataURL('image/png');
+    const link = document.createElement('a');
+    link.download = `snapshot_${selectedDevice.value?.deviceId || 'camera'}_${Date.now()}.png`;
+    link.href = dataUrl;
+    link.click();
+    ElMessage.success('截图成功，已保存到本地');
+  } catch (err) {
+    console.error('截图失败:', err);
+    ElMessage.error('截图失败，请确保视频正在播放');
+  }
+};
+
 // 对讲状态与变量
 const isIntercomActive = ref(false);
 const connectingIntercom = ref(false);
@@ -246,7 +334,7 @@ let talkWs = null;
 let talkAudioContext = null; // 独立对讲的 AudioContext，防止与播放器的 AudioContext 冲突
 let audioContext = null;
 let gainNode = null;
-let filterNode = null;
+let filterNodes = []; // 低通滤波节点数组，串联连接以陡峭衰减高频飞机音/啸叫
 let highpassNode = null; // 高通滤波节点，用于过滤低频交流电声/杂音
 let audioDest = null;
 let mediaStream = null;
@@ -304,6 +392,20 @@ const toggleDevice = (dev) => {
 };
 
 const selectChannel = (dev, ch) => {
+  // 如果点击的是当前已经在播放/加载的通道，直接返回，不做任何操作，防止重复触发拉流与断流逻辑
+  if (selectedDevice.value?.deviceId === dev.deviceId && selectedChannel.value?.channelId === ch.channelId) {
+    return;
+  }
+
+  // 如果切换通道时已有旧的通道正在预览，立即关闭并清理旧视频流，防止音频在后台继续播放或残留
+  if (selectedDevice.value && selectedChannel.value) {
+    closeStream(true);
+  }
+
+  // 切换通道时，重置静音状态和音量为默认值
+  isMuted.value = true;
+  volumeVal.value = 30;
+
   selectedDevice.value = dev;
   selectedChannel.value = ch;
   
@@ -314,7 +416,7 @@ const selectChannel = (dev, ch) => {
 
 // 切换播放模式
 const handleModeChange = () => {
-  closeStream();
+  closeStream(true);
   debugInfo.value = null;
   if (playMode.value === 'live' && selectedChannel.value) {
     startLiveStream();
@@ -323,7 +425,7 @@ const handleModeChange = () => {
 
 // 切换播放协议
 const handleStreamTypeChange = () => {
-  closeStream();
+  closeStream(true);
   if (!selectedChannel.value) return;
   if (playMode.value === 'live') {
     startLiveStream();
@@ -333,8 +435,16 @@ const handleStreamTypeChange = () => {
 };
 
 // 关闭当前流连接
-const closeStream = () => {
+const closeStream = (shouldStopBackend = true) => {
   stopIntercom();
+
+  // 主动通知后台关闭当前播放通道的预览流，释放设备与流媒体端口资源
+  if (shouldStopBackend && selectedDevice.value && selectedChannel.value) {
+    stopPreviewApi(selectedDevice.value.deviceId, selectedChannel.value.channelId).catch(e => {
+      console.warn('通知后端关闭预览流失败:', e);
+    });
+  }
+
   if (peerConnection) {
     peerConnection.close();
     peerConnection = null;
@@ -352,11 +462,34 @@ const closeStream = () => {
     } catch (e) {}
     audioSource = null;
   }
+  if (gainNode) {
+    try {
+      gainNode.disconnect();
+    } catch (e) {}
+    gainNode = null;
+  }
+  if (filterNodes && filterNodes.length > 0) {
+    filterNodes.forEach(node => {
+      try {
+        node.disconnect();
+      } catch (e) {}
+    });
+    filterNodes = [];
+  }
   if (highpassNode) {
     try {
       highpassNode.disconnect();
     } catch (e) {}
     highpassNode = null;
+  }
+  if (audioDest) {
+    audioDest = null;
+  }
+  if (audioContext) {
+    try {
+      audioContext.close();
+    } catch (e) {}
+    audioContext = null;
   }
   if (flvPlayer) {
     try {
@@ -505,7 +638,7 @@ const stopIntercom = () => {
 
 // FLV 播放逻辑
 const startFLV = (flvUrl) => {
-  closeStream();
+  closeStream(false);
   loading.value = true;
 
   if (mpegts.isSupported()) {
@@ -533,7 +666,7 @@ const startFLV = (flvUrl) => {
       ElMessage.success('FLV 连接成功，开始播放');
     } catch (err) {
       console.error('FLV 初始化失败:', err);
-      closeStream();
+      closeStream(true);
       ElMessage.error('视频流加载失败，请检查流媒体服务连接');
     }
   } else {
@@ -543,7 +676,7 @@ const startFLV = (flvUrl) => {
 
 // WebRTC 协商握手逻辑
 const startWebRTC = async (webrtcUrl) => {
-  closeStream();
+  closeStream(false);
   loading.value = true;
 
   try {
@@ -565,17 +698,22 @@ const startWebRTC = async (webrtcUrl) => {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         gainNode = audioContext.createGain();
         
-        filterNode = audioContext.createBiquadFilter();
-        filterNode.type = 'lowpass';
-        filterNode.frequency.value = noiseFilterEnabled.value ? filterFrequency.value : 20000; // 低通滤波截止频率
+        // 创建 3 个低通滤波器进行串联，使过滤斜率增加到 36dB/octave，以获得极强的啸叫/高频噪声抑制效果
+        filterNodes = [];
+        for (let i = 0; i < 3; i++) {
+          const lp = audioContext.createBiquadFilter();
+          lp.type = 'lowpass';
+          lp.frequency.value = noiseFilterEnabled.value ? filterFrequency.value : 20000;
+          filterNodes.push(lp);
+        }
         
         highpassNode = audioContext.createBiquadFilter();
         highpassNode.type = 'highpass';
         highpassNode.frequency.value = noiseFilterEnabled.value ? 300 : 20; // 高通滤波，过滤 300Hz 以下低频杂音
         
         audioDest = audioContext.createMediaStreamDestination();
-        // 初始增益值同步
-        gainNode.gain.value = audioGain.value;
+        // 初始增益值同步，尊重静音状态和音量设定
+        gainNode.gain.value = isMuted.value ? 0 : (volumeVal.value / 100) * audioGain.value;
       }
 
       if (videoRef.value) {
@@ -590,9 +728,15 @@ const startWebRTC = async (webrtcUrl) => {
           if (!dummyAudio) {
             dummyAudio = new Audio();
             dummyAudio.muted = true;
+            dummyAudio.volume = 0;
           }
-          dummyAudio.srcObject = new MediaStream([audioTrack]);
-          dummyAudio.play().catch(e => console.warn('Dummy audio autoplay failed', e));
+          
+          // 仅在 srcObject 为空或者包含的轨道发生改变时才重新设定和播放，避免重复播放抛出 AbortError
+          const currentTracks = dummyAudio.srcObject ? dummyAudio.srcObject.getAudioTracks() : [];
+          if (!dummyAudio.srcObject || currentTracks.length === 0 || currentTracks[0].id !== audioTrack.id) {
+            dummyAudio.srcObject = new MediaStream([audioTrack]);
+            dummyAudio.play().catch(e => console.warn('Dummy audio autoplay failed', e));
+          }
 
           // 重新构建音频源
           if (audioSource) {
@@ -607,12 +751,16 @@ const startWebRTC = async (webrtcUrl) => {
           if (highpassNode) {
             highpassNode.disconnect();
           }
-          filterNode.disconnect();
+          if (filterNodes && filterNodes.length > 0) {
+            filterNodes.forEach(node => node.disconnect());
+          }
           
           audioSource.connect(gainNode);
           gainNode.connect(highpassNode);
-          highpassNode.connect(filterNode);
-          filterNode.connect(audioDest);
+          highpassNode.connect(filterNodes[0]);
+          filterNodes[0].connect(filterNodes[1]);
+          filterNodes[1].connect(filterNodes[2]);
+          filterNodes[2].connect(audioDest);
 
           // 合并视频轨道与处理后音频轨道
           finalStream = new MediaStream([
@@ -620,10 +768,12 @@ const startWebRTC = async (webrtcUrl) => {
             ...audioDest.stream.getAudioTracks()
           ]);
         } else {
-          // 仅视频无音频
-          finalStream = remoteStream;
+          // 仅视频无音频，必须创建新 MediaStream 以防后续收到的音频轨道被浏览器直接播放
+          finalStream = new MediaStream(videoTrack ? [videoTrack] : []);
         }
         videoRef.value.srcObject = finalStream;
+        videoRef.value.muted = isMuted.value;
+        videoRef.value.volume = volumeVal.value / 100;
         videoRef.value.play().then(() => {
           resumeAudioContext();
         }).catch(err => {
@@ -649,8 +799,10 @@ const startWebRTC = async (webrtcUrl) => {
 
     let answerSdp = "";
     // 确保在音频处理前已经根据当前设置更新过滤频率
-    if (filterNode) {
-      filterNode.frequency.value = noiseFilterEnabled.value ? filterFrequency.value : 20000;
+    if (filterNodes && filterNodes.length > 0) {
+      filterNodes.forEach(node => {
+        node.frequency.value = noiseFilterEnabled.value ? filterFrequency.value : 20000;
+      });
     }
     if (highpassNode) {
       highpassNode.frequency.value = noiseFilterEnabled.value ? 300 : 20;
@@ -675,7 +827,7 @@ const startWebRTC = async (webrtcUrl) => {
     ElMessage.success('WebRTC 连接建立成功，开始播放');
   } catch (err) {
     console.error('WebRTC 握手失败：', err);
-    closeStream();
+    closeStream(true);
     ElMessage.error('视频流加载失败，请检查流媒体服务连接');
   }
 };
@@ -683,10 +835,20 @@ const startWebRTC = async (webrtcUrl) => {
 // 实时预览
 const startLiveStream = async () => {
   if (!selectedDevice.value || !selectedChannel.value) return;
+  
+  const targetDevId = selectedDevice.value.deviceId;
+  const targetChId = selectedChannel.value.channelId;
   loading.value = true;
   
   try {
-    const res = await startPreviewApi(selectedDevice.value.deviceId, selectedChannel.value.channelId);
+    const res = await startPreviewApi(targetDevId, targetChId);
+    
+    // 竞态防抖检查：如果在等待网络响应期间用户切换了通道，则停止并忽略这个过时的流
+    if (selectedDevice.value?.deviceId !== targetDevId || selectedChannel.value?.channelId !== targetChId) {
+      stopPreviewApi(targetDevId, targetChId).catch(e => {});
+      return;
+    }
+
     if (res.code === 200 || res.code === 0) {
       debugInfo.value = res.data;
       if (streamType.value === 'webrtc') {
@@ -710,7 +872,9 @@ const startLiveStream = async () => {
     }
   } catch (err) {
     console.error(err);
-    loading.value = false;
+    if (selectedDevice.value?.deviceId === targetDevId && selectedChannel.value?.channelId === targetChId) {
+      loading.value = false;
+    }
   }
 };
 
@@ -821,7 +985,7 @@ const initSse = () => {
         alarmLogs.value.unshift(newLog);
 
         ElNotification({
-          title: 'ISUP 设备告警触发',
+          title: '设备告警触发',
           message: `设备 [${deviceId}] 触发告警：${newLog.message.substring(0, 100)}...`,
           type: 'error',
           duration: 10000,
@@ -840,26 +1004,30 @@ const initSse = () => {
 // 监听消噪开关变化，动态更新音频节点参数
 watch(noiseFilterEnabled, (val) => {
   if (audioContext) {
-    if (filterNode) {
-      filterNode.frequency.setValueAtTime(val ? filterFrequency.value : 20000, audioContext.currentTime);
+    if (filterNodes && filterNodes.length > 0) {
+      filterNodes.forEach(node => {
+        node.frequency.value = val ? filterFrequency.value : 20000;
+      });
     }
     if (highpassNode) {
-      highpassNode.frequency.setValueAtTime(val ? 300 : 20, audioContext.currentTime);
+      highpassNode.frequency.value = val ? 300 : 20;
     }
   }
 });
 
 // 监听截止频率变化，动态调整低通滤波
 watch(filterFrequency, (val) => {
-  if (audioContext && filterNode && noiseFilterEnabled.value) {
-    filterNode.frequency.setValueAtTime(val, audioContext.currentTime);
+  if (audioContext && filterNodes && filterNodes.length > 0 && noiseFilterEnabled.value) {
+    filterNodes.forEach(node => {
+      node.frequency.value = val;
+    });
   }
 });
 
 // 监听增益增幅变化
 watch(audioGain, (val) => {
   if (audioContext && gainNode) {
-    gainNode.gain.setValueAtTime(val, audioContext.currentTime);
+    gainNode.gain.value = val;
   }
 });
 
@@ -874,13 +1042,17 @@ const resumeAudioContext = () => {
   }
 };
 
-// 同步视频音量到 gainNode
+// 同步视频音量到 gainNode 并同步更新 Vue ref 变量
 const handleVolumeChange = () => {
-  if (videoRef.value && gainNode) {
-    if (videoRef.value.muted) {
-      gainNode.gain.value = 0;
-    } else {
-      gainNode.gain.value = videoRef.value.volume * audioGain.value;
+  if (videoRef.value) {
+    isMuted.value = videoRef.value.muted;
+    volumeVal.value = Math.round(videoRef.value.volume * 100);
+    if (gainNode) {
+      if (isMuted.value) {
+        gainNode.gain.value = 0;
+      } else {
+        gainNode.gain.value = videoRef.value.volume * audioGain.value;
+      }
     }
   }
 };
@@ -891,6 +1063,7 @@ onMounted(() => {
   initSse();
   window.addEventListener('click', resumeAudioContext);
   window.addEventListener('touchstart', resumeAudioContext);
+
   if (videoRef.value) {
     videoRef.value.addEventListener('volumechange', handleVolumeChange);
   }
@@ -903,6 +1076,7 @@ onUnmounted(() => {
   }
   window.removeEventListener('click', resumeAudioContext);
   window.removeEventListener('touchstart', resumeAudioContext);
+
   if (videoRef.value) {
     videoRef.value.removeEventListener('volumechange', handleVolumeChange);
   }
@@ -1232,5 +1406,151 @@ onUnmounted(() => {
 
 :deep(.el-table__body tr:hover > td.el-table__cell) {
   background-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+/* 自定义播放控制栏样式 (海康 CCTV 客户端风格) */
+.custom-player-controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 44px;
+  background: #141417;
+  border-top: 2px solid #eab308; /* 黄色/金色顶边线 */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  z-index: 10;
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.5);
+  user-select: none;
+}
+
+.controls-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.control-btn {
+  background: none;
+  border: 1px solid transparent;
+  color: #a3a3a3;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  border-radius: 2px;
+  transition: all 0.2s ease;
+}
+
+.control-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* 语音对讲按钮高亮红框样式 */
+.control-btn.talk-btn.active {
+  color: #f87171 !important;
+  border: 1.5px solid #ef4444 !important;
+  background: rgba(239, 68, 68, 0.15) !important;
+}
+
+.control-btn.talk-btn.loading {
+  color: #fbbf24 !important;
+  background: rgba(251, 191, 36, 0.1) !important;
+}
+
+/* 音量控制组 */
+.volume-control-container {
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+
+.volume-slider {
+  width: 0;
+  opacity: 0;
+  height: 4px;
+  -webkit-appearance: none;
+  background: rgba(255, 255, 255, 0.2);
+  outline: none;
+  border-radius: 2px;
+  transition: all 0.3s ease;
+  cursor: pointer;
+  margin-left: 0;
+}
+
+/* 悬浮展开音量滑块与数字 */
+.volume-control-container:hover .volume-slider {
+  width: 70px;
+  opacity: 1;
+  margin-left: 8px;
+  margin-right: 8px;
+}
+
+.volume-text {
+  font-size: 11px;
+  color: #a3a3a3;
+  width: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+  user-select: none;
+  text-align: left;
+}
+
+.volume-control-container:hover .volume-text {
+  width: 24px;
+  opacity: 1;
+}
+
+/* Chrome/Safari 轨道滑块样式 */
+.volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #eab308;
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+.volume-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+/* Firefox 轨道滑块样式 */
+.volume-slider::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border: none;
+  border-radius: 50%;
+  background: #eab308;
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+.volume-slider::-moz-range-thumb:hover {
+  transform: scale(1.2);
+}
+
+.controls-right {
+  display: flex;
+  align-items: center;
+}
+
+.live-badge {
+  font-size: 10px;
+  background: rgba(234, 179, 8, 0.15);
+  color: #eab308;
+  border: 1px solid rgba(234, 179, 8, 0.3);
+  padding: 1px 5px;
+  border-radius: 2px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
 }
 </style>

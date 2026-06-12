@@ -8,6 +8,8 @@ import com.oldwei.isup.model.Device;
 import com.oldwei.isup.sdk.StreamManager;
 import com.oldwei.isup.sdk.service.HCISUPCMS;
 import com.oldwei.isup.sdk.service.IHikISUPStream;
+import com.oldwei.isup.sdk.service.impl.FPREVIEW_NEWLINK_CB_FILE;
+import com.oldwei.isup.sdk.service.impl.PlaybackNewlinkCallbackHandler;
 import com.oldwei.isup.sdk.structure.*;
 import com.oldwei.isup.service.IMediaStreamService;
 import lombok.RequiredArgsConstructor;
@@ -33,6 +35,8 @@ public class MediaStreamServiceImpl implements IMediaStreamService {
     private final IHikISUPStream hikISUPStream;
     private final HCISUPCMS hcisupcms;
     private final ZLMApi zlmApi;
+    private final FPREVIEW_NEWLINK_CB_FILE fpreviewNewlinkCbFile;
+    private final PlaybackNewlinkCallbackHandler playbackNewlinkCallbackHandler;
 
 
     // RTP端口管理：起始端口
@@ -71,6 +75,9 @@ public class MediaStreamServiceImpl implements IMediaStreamService {
             log.error("无效的预览句柄，无法停止预览");
             return;
         }
+        // 首先主动关闭流处理器及 RTP Socket 写入，防止 JNA 异步回调抛出 Socket closed 异常
+        fpreviewNewlinkCbFile.closePreviewHandler(previewHandleId);
+
         if (!hikISUPStream.NET_ESTREAM_StopPreview(previewHandleId)) {
             log.error("NET_ESTREAM_StopPreview failed,err = {}", hikISUPStream.NET_ESTREAM_GetLastError());
             return;
@@ -293,6 +300,9 @@ public class MediaStreamServiceImpl implements IMediaStreamService {
             log.error("无效的预览句柄，无法停止预览");
             return;
         }
+        // 首先主动关闭流处理器及 RTP Socket 写入，防止 JNA 异步回调抛出 Socket closed 异常
+        playbackNewlinkCallbackHandler.closePlaybackHandler(lPreviewHandle);
+
         if (!hikISUPStream.NET_ESTREAM_StopPlayBack(lPreviewHandle)) {
             System.out.println("NET_ESTREAM_StopPlayBack failed,err = " + hikISUPStream.NET_ESTREAM_GetLastError());
             return;

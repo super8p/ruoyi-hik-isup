@@ -45,6 +45,11 @@ public class PreviewStreamHandler implements PREVIEW_DATA_CB {
 
         // 获取或创建该句柄对应的连接
         RtpConnection connection = connectionMap.computeIfAbsent(iPreviewHandle, handle -> {
+            Integer sessId = StreamManager.previewHandSAndSessionIDandMap.get(handle);
+            if (sessId == null) {
+                // 会话已在StreamManager中销毁，停止新建连接
+                return null;
+            }
             RtpConnection conn = new RtpConnection();
             try {
                 // 使用动态分配的端口
@@ -59,7 +64,9 @@ public class PreviewStreamHandler implements PREVIEW_DATA_CB {
         });
 
         if (connection == null || connection.rtpOutputStream == null) {
-            log.error("RTP连接不可用，句柄: {}", iPreviewHandle);
+            if (StreamManager.previewHandSAndSessionIDandMap.containsKey(iPreviewHandle)) {
+                log.error("RTP连接不可用，句柄: {}", iPreviewHandle);
+            }
             return;
         }
 
@@ -111,7 +118,12 @@ public class PreviewStreamHandler implements PREVIEW_DATA_CB {
                             datasize -= useDataSize;
                         }
                     } catch (IOException e) {
-                        log.error("写入RTP数据失败，句柄: {}", iPreviewHandle, e);
+                        String msg = e.getMessage();
+                        if (msg != null && (msg.contains("Socket closed") || msg.contains("Connection reset") || msg.contains("Broken pipe"))) {
+                            log.info("RTP连接已关闭，停止写入RTP数据，句柄: {}", iPreviewHandle);
+                        } else {
+                            log.error("写入RTP数据失败，句柄: {}, 原因: {}", iPreviewHandle, msg);
+                        }
                         // 发生异常时清理该连接
                         closeConnection(iPreviewHandle);
                     }
