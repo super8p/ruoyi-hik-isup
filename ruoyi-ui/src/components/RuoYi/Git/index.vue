@@ -5,7 +5,7 @@
 </template>
 
 <script setup>
-const url = ref('https://gitee.com/y_project/RuoYi-Vue');
+const url = ref('https://github.com/super8p/ruoyi-hik-isup');
 
 function goto() {
   window.open(url.value)

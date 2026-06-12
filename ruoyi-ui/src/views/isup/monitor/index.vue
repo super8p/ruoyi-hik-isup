@@ -113,6 +113,41 @@
         <div class="glass-card full-height right-controls">
 
 
+          <!-- 音频消噪设置 -->
+          <div class="audio-settings-section">
+            <h4>音频消噪设置 (WebRTC)</h4>
+            <div class="setting-item">
+              <span class="setting-label">消噪滤波开关</span>
+              <el-switch v-model="noiseFilterEnabled" />
+            </div>
+            <div class="setting-item">
+              <div class="slider-header">
+                <span>低通截止频率</span>
+                <span class="slider-val">{{ filterFrequency }} Hz</span>
+              </div>
+              <el-slider 
+                v-model="filterFrequency" 
+                :min="1000" 
+                :max="8000" 
+                :step="100"
+                :disabled="!noiseFilterEnabled"
+              />
+              <div class="setting-hint">说明: 降至 2500Hz-3000Hz 可有效去除啸叫与高频“飞机音”</div>
+            </div>
+            <div class="setting-item">
+              <div class="slider-header">
+                <span>人声增益强度</span>
+                <span class="slider-val">{{ audioGain.toFixed(1) }}x</span>
+              </div>
+              <el-slider 
+                v-model="audioGain" 
+                :min="0.5" 
+                :max="5.0" 
+                :step="0.1"
+              />
+            </div>
+          </div>
+
           <!-- TTS 语音广播 -->
           <div class="voice-section">
             <h4>TTS 语音播报</h4>
@@ -167,7 +202,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, watch, onMounted, onUnmounted } from 'vue';
 import request from '@/utils/request';
 import mpegts from 'mpegts.js';
 import { ElMessage, ElNotification } from 'element-plus';
@@ -199,17 +234,29 @@ const ttsText = ref('检测到烟雾，请尽快撤离！');
 const sendingTts = ref(false);
 const videoRef = ref(null);
 
+// 音频处理相关
+const audioGain = ref(1.0); // 增益默认 1.0
+const noiseFilterEnabled = ref(true); // 噪声抑制开关
+const filterFrequency = ref(3000); // 截止频率默认 3000Hz
+
 // 对讲状态与变量
 const isIntercomActive = ref(false);
 const connectingIntercom = ref(false);
 let talkWs = null;
+let talkAudioContext = null; // 独立对讲的 AudioContext，防止与播放器的 AudioContext 冲突
 let audioContext = null;
+let gainNode = null;
+let filterNode = null;
+let highpassNode = null; // 高通滤波节点，用于过滤低频交流电声/杂音
+let audioDest = null;
 let mediaStream = null;
 let scriptProcessor = null;
 
-// WebRTC 状态
+// WebRTC 状态与音频处理
 let peerConnection = null;
 let flvPlayer = null;
+let dummyAudio = null; // 用于在 Chrome 下激活/拉取 WebRTC 音频轨道
+let audioSource = null;
 
 // 实时消防告警
 const alarmLogs = ref([]);
@@ -291,6 +338,25 @@ const closeStream = () => {
   if (peerConnection) {
     peerConnection.close();
     peerConnection = null;
+  }
+  if (dummyAudio) {
+    try {
+      dummyAudio.pause();
+      dummyAudio.srcObject = null;
+    } catch (e) {}
+    dummyAudio = null;
+  }
+  if (audioSource) {
+    try {
+      audioSource.disconnect();
+    } catch (e) {}
+    audioSource = null;
+  }
+  if (highpassNode) {
+    try {
+      highpassNode.disconnect();
+    } catch (e) {}
+    highpassNode = null;
   }
   if (flvPlayer) {
     try {
@@ -379,11 +445,11 @@ const startIntercom = async () => {
 };
 
 const startAudioCapture = () => {
-  audioContext = new (window.AudioContext || window.webkitAudioContext)();
-  const source = audioContext.createMediaStreamSource(mediaStream);
+  talkAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+  const source = talkAudioContext.createMediaStreamSource(mediaStream);
   
-  scriptProcessor = audioContext.createScriptProcessor(2048, 1, 1);
-  const inputSampleRate = audioContext.sampleRate;
+  scriptProcessor = talkAudioContext.createScriptProcessor(2048, 1, 1);
+  const inputSampleRate = talkAudioContext.sampleRate;
 
   let audioQueue = [];
 
@@ -408,7 +474,7 @@ const startAudioCapture = () => {
   };
 
   source.connect(scriptProcessor);
-  scriptProcessor.connect(audioContext.destination);
+  scriptProcessor.connect(talkAudioContext.destination);
 };
 
 const stopIntercom = () => {
@@ -419,11 +485,11 @@ const stopIntercom = () => {
     scriptProcessor.disconnect();
     scriptProcessor = null;
   }
-  if (audioContext) {
+  if (talkAudioContext) {
     try {
-      audioContext.close();
+      talkAudioContext.close();
     } catch (e) {}
-    audioContext = null;
+    talkAudioContext = null;
   }
   if (mediaStream) {
     mediaStream.getTracks().forEach(track => track.stop());
@@ -490,12 +556,77 @@ const startWebRTC = async (webrtcUrl) => {
     peerConnection.addTransceiver('video', { direction: 'recvonly' });
     peerConnection.addTransceiver('audio', { direction: 'recvonly' });
 
-    // 3. 监听轨道添加
+    // 3. 监听轨道添加并进行音频处理
     peerConnection.ontrack = (event) => {
       console.log('收到媒体流轨道：', event.streams);
+
+      // 确保音频上下文已创建
+      if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        gainNode = audioContext.createGain();
+        
+        filterNode = audioContext.createBiquadFilter();
+        filterNode.type = 'lowpass';
+        filterNode.frequency.value = noiseFilterEnabled.value ? filterFrequency.value : 20000; // 低通滤波截止频率
+        
+        highpassNode = audioContext.createBiquadFilter();
+        highpassNode.type = 'highpass';
+        highpassNode.frequency.value = noiseFilterEnabled.value ? 300 : 20; // 高通滤波，过滤 300Hz 以下低频杂音
+        
+        audioDest = audioContext.createMediaStreamDestination();
+        // 初始增益值同步
+        gainNode.gain.value = audioGain.value;
+      }
+
       if (videoRef.value) {
-        videoRef.value.srcObject = event.streams[0];
-        videoRef.value.play().catch(err => {
+        const remoteStream = event.streams[0];
+        const videoTrack = remoteStream.getVideoTracks()[0];
+        const audioTrack = remoteStream.getAudioTracks()[0];
+
+        // 若有音频轨道，进行处理后混流
+        let finalStream;
+        if (audioTrack) {
+          // 在 Chrome 中，必须有 HTMLMediaElement 播放流才能激活/拉取音频轨道数据到 AudioContext
+          if (!dummyAudio) {
+            dummyAudio = new Audio();
+            dummyAudio.muted = true;
+          }
+          dummyAudio.srcObject = new MediaStream([audioTrack]);
+          dummyAudio.play().catch(e => console.warn('Dummy audio autoplay failed', e));
+
+          // 重新构建音频源
+          if (audioSource) {
+            try {
+              audioSource.disconnect();
+            } catch (e) {}
+          }
+          audioSource = audioContext.createMediaStreamSource(dummyAudio.srcObject);
+
+          // 重新构建音频处理链
+          gainNode.disconnect();
+          if (highpassNode) {
+            highpassNode.disconnect();
+          }
+          filterNode.disconnect();
+          
+          audioSource.connect(gainNode);
+          gainNode.connect(highpassNode);
+          highpassNode.connect(filterNode);
+          filterNode.connect(audioDest);
+
+          // 合并视频轨道与处理后音频轨道
+          finalStream = new MediaStream([
+            ...(videoTrack ? [videoTrack] : []),
+            ...audioDest.stream.getAudioTracks()
+          ]);
+        } else {
+          // 仅视频无音频
+          finalStream = remoteStream;
+        }
+        videoRef.value.srcObject = finalStream;
+        videoRef.value.play().then(() => {
+          resumeAudioContext();
+        }).catch(err => {
           console.warn('视频自动播放被浏览器拦截，需要用户交互:', err);
         });
       }
@@ -517,6 +648,13 @@ const startWebRTC = async (webrtcUrl) => {
     });
 
     let answerSdp = "";
+    // 确保在音频处理前已经根据当前设置更新过滤频率
+    if (filterNode) {
+      filterNode.frequency.value = noiseFilterEnabled.value ? filterFrequency.value : 20000;
+    }
+    if (highpassNode) {
+      highpassNode.frequency.value = noiseFilterEnabled.value ? 300 : 20;
+    }
     if (response && response.code === 200) {
       answerSdp = response.data;
     } else {
@@ -699,16 +837,74 @@ const initSse = () => {
   }
 };
 
+// 监听消噪开关变化，动态更新音频节点参数
+watch(noiseFilterEnabled, (val) => {
+  if (audioContext) {
+    if (filterNode) {
+      filterNode.frequency.setValueAtTime(val ? filterFrequency.value : 20000, audioContext.currentTime);
+    }
+    if (highpassNode) {
+      highpassNode.frequency.setValueAtTime(val ? 300 : 20, audioContext.currentTime);
+    }
+  }
+});
+
+// 监听截止频率变化，动态调整低通滤波
+watch(filterFrequency, (val) => {
+  if (audioContext && filterNode && noiseFilterEnabled.value) {
+    filterNode.frequency.setValueAtTime(val, audioContext.currentTime);
+  }
+});
+
+// 监听增益增幅变化
+watch(audioGain, (val) => {
+  if (audioContext && gainNode) {
+    gainNode.gain.setValueAtTime(val, audioContext.currentTime);
+  }
+});
+
+// 恢复 AudioContext (解决浏览器自动播放限制)
+const resumeAudioContext = () => {
+  if (audioContext && audioContext.state === 'suspended') {
+    audioContext.resume().then(() => {
+      console.log('AudioContext 成功恢复');
+    }).catch(err => {
+      console.error('恢复 AudioContext 失败:', err);
+    });
+  }
+};
+
+// 同步视频音量到 gainNode
+const handleVolumeChange = () => {
+  if (videoRef.value && gainNode) {
+    if (videoRef.value.muted) {
+      gainNode.gain.value = 0;
+    } else {
+      gainNode.gain.value = videoRef.value.volume * audioGain.value;
+    }
+  }
+};
+
 // 钩子
 onMounted(() => {
   fetchDevices();
   initSse();
+  window.addEventListener('click', resumeAudioContext);
+  window.addEventListener('touchstart', resumeAudioContext);
+  if (videoRef.value) {
+    videoRef.value.addEventListener('volumechange', handleVolumeChange);
+  }
 });
 
 onUnmounted(() => {
   closeStream();
   if (sseSource) {
     sseSource.close();
+  }
+  window.removeEventListener('click', resumeAudioContext);
+  window.removeEventListener('touchstart', resumeAudioContext);
+  if (videoRef.value) {
+    videoRef.value.removeEventListener('volumechange', handleVolumeChange);
   }
 });
 </script>
@@ -916,6 +1112,53 @@ onUnmounted(() => {
 .right-controls {
   justify-content: flex-start;
   gap: 24px;
+}
+
+.audio-settings-section {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.audio-settings-section h4 {
+  margin: 0 0 15px 0;
+  font-size: 14px;
+  color: #cbd5e1;
+  font-weight: 600;
+}
+
+.setting-item {
+  margin-bottom: 15px;
+}
+
+.setting-item :deep(.el-slider) {
+  height: 26px;
+}
+
+.setting-label {
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.slider-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  margin-bottom: 5px;
+  color: #94a3b8;
+}
+
+.slider-val {
+  color: #60a5fa;
+  font-weight: 600;
+}
+
+.setting-hint {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 2px;
+  line-height: 1.4;
 }
 
 .voice-section {
