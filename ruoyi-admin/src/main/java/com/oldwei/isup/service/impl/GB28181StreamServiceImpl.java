@@ -95,11 +95,15 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
     public CompletableFuture<String> startPlay(String deviceId, String channelId) {
         String streamKey = deviceId + "_" + channelId;
         if (sessions.containsKey(streamKey)) {
-            log.info("GB28181 play already in progress for stream: {}, ignore.", streamKey);
-            // 已存在的 Session 直接返回其 ssrcHex
             GB28181Session exist = sessions.get(streamKey);
-            String ssrcHex = Long.toHexString(Long.parseLong(exist.getSsrc())).toUpperCase();
-            return CompletableFuture.completedFuture(ssrcHex);
+            String ssrcHex = String.format("%08X", Long.parseLong(exist.getSsrc()));
+            if (isStreamExistInZlm("rtp", ssrcHex)) {
+                log.info("GB28181 play already in progress and active in ZLM for stream: {}, ignore.", streamKey);
+                return CompletableFuture.completedFuture(ssrcHex);
+            } else {
+                log.info("GB28181 session exists for stream: {} but stream is not active in ZLM. Cleaning up stale session and restarting play.", streamKey);
+                stopPlay(deviceId, channelId);
+            }
         }
 
         GbDevice device = deviceMapper.selectByDeviceId(deviceId);
@@ -127,7 +131,7 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
             // 1. 生成 10 位 SSRC (Live 视频首位为 0)
             String ssrcSeq = String.format("%04d", (int) (Math.random() * 10000));
             String ssrc = "0" + sipConfig.getId().substring(3, 8) + ssrcSeq;
-            String ssrcHex = Long.toHexString(Long.parseLong(ssrc)).toUpperCase();
+            String ssrcHex = String.format("%08X", Long.parseLong(ssrc));
 
             // 2. 动态决定媒体传输模式与 SDP 字段
             int tcpMode = 0; // 默认 UDP
@@ -138,11 +142,11 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
             if ("TCP-PASSIVE".equalsIgnoreCase(streamMode)) {
                 tcpMode = 2;
                 mLine = "m=video " + rtpPort + " TCP/RTP/AVP 96\r\n";
-                aSetup = "a=setup:active\r\n";
+                aSetup = "a=connection:new\r\na=setup:active\r\n";
             } else if ("TCP-ACTIVE".equalsIgnoreCase(streamMode)) {
                 tcpMode = 1;
                 mLine = "m=video " + rtpPort + " TCP/RTP/AVP 96\r\n";
-                aSetup = "a=setup:passive\r\n";
+                aSetup = "a=connection:new\r\na=setup:passive\r\n";
             }
 
             // 在 ZLMediaKit 创建 RTP 服务接收端口，根据 tcpMode 进行绑定
@@ -419,11 +423,31 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
                         Dialog dialog = clientTransaction.getDialog();
                         session.setDialog(dialog);
 
+                        byte[] rawContent = response.getRawContent();
+                        String responseSdp = (rawContent != null && rawContent.length > 0)
+                                ? new String(rawContent, "UTF-8") : null;
+                        if (responseSdp != null) {
+                            log.info("Device INVITE 200 OK SDP:\n{}", responseSdp);
+                        }
+
+                        GbDevice device = deviceMapper.selectByDeviceId(session.getDeviceId());
+
+                        // GB28181 TCP：设备 a=setup:passive 时平台须在 ACK 前连接媒体端口
+                        if (!session.isTalk() && responseSdp != null && session.getRtpServer() != null
+                                && shouldPlatformConnectTcp(responseSdp, device, "video")) {
+                            String dstIp = resolveMediaDstIp(parseIpFromSdp(responseSdp), session.getDeviceId());
+                            int dstPort = parsePortFromSdp(responseSdp, "video");
+                            if (dstIp != null && dstPort > 0) {
+                                connectRtpServerToDevice(session.getRtpServer(), dstIp, dstPort, true);
+                            } else {
+                                log.error("Failed to parse device video IP/Port from SDP for TCP connection.");
+                            }
+                        }
+
                         // 发送 ACK 报文
                         Request ackRequest = dialog.createAck(cSeqHeader.getSeqNumber());
                         if (ackRequest.getRequestURI() instanceof SipURI) {
                             SipURI ackUri = (SipURI) ackRequest.getRequestURI();
-                            GbDevice device = deviceMapper.selectByDeviceId(session.getDeviceId());
                             if (device != null && device.getIp() != null) {
                                 ackUri.setHost(device.getIp());
                                 if (device.getPort() != null && device.getPort() > 0) {
@@ -436,45 +460,23 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
 
                         // ★ INVITE OK 时完成 ssrcFuture（对标 wvp: ZLM 注册流为 rtp/{SSRC十六进制大写}）
                         if (!session.isTalk() && session.getSsrcFuture() != null) {
-                            String ssrcHex = Long.toHexString(Long.parseLong(session.getSsrc())).toUpperCase();
+                            String ssrcHex = String.format("%08X", Long.parseLong(session.getSsrc()));
                             log.info("[GB28181预览] INVITE 200 OK，ssrc={}, ssrcHex={}, ZLM流为 rtp/{}",
                                     session.getSsrc(), ssrcHex, ssrcHex);
-
-                            // TCP-PASSIVE 模式下，平台主动连接设备
-                            GbDevice device = deviceMapper.selectByDeviceId(session.getDeviceId());
-                            if (device != null && "TCP-PASSIVE".equalsIgnoreCase(device.getStreamMode())) {
-                                byte[] rawContent = response.getRawContent();
-                                if (rawContent != null && rawContent.length > 0) {
-                                    String responseSdp = new String(rawContent, "UTF-8");
-                                    String dstIp = getResolvedDstIp(parseIpFromSdp(responseSdp), session.getDeviceId());
-                                    int dstPort = parsePortFromSdp(responseSdp, "video");
-                                    if (dstIp != null && dstPort > 0) {
-                                        log.info("TCP-PASSIVE mode: Connecting ZLM RTP server to device {}:{}", dstIp, dstPort);
-                                        zlmApi.mk_rtp_server_connect(session.getRtpServer(), dstIp, (short) dstPort, null, null);
-                                    } else {
-                                        log.error("Failed to parse device video IP/Port from SDP for TCP-PASSIVE connection.");
-                                    }
-                                }
-                            }
-
                             session.getSsrcFuture().complete(ssrcHex);
                         }
 
                         // 如果该 Session 属于语音对讲
-                        if (session.isTalk()) {
-                            byte[] rawContent = response.getRawContent();
-                            if (rawContent != null && rawContent.length > 0) {
-                                String responseSdp = new String(rawContent, "UTF-8");
-                                log.info("Intercom device SDP response:\n{}", responseSdp);
+                        if (session.isTalk() && responseSdp != null) {
+                            log.info("Intercom device SDP response:\n{}", responseSdp);
 
-                                String dstIp = getResolvedDstIp(parseIpFromSdp(responseSdp), session.getDeviceId());
-                                int dstPort = parsePortFromSdp(responseSdp, "audio");
+                            String dstIp = resolveMediaDstIp(parseIpFromSdp(responseSdp), session.getDeviceId());
+                            int dstPort = parsePortFromSdp(responseSdp, "audio");
 
-                                if (dstIp != null && dstPort > 0) {
-                                    triggerZlmStartSendRtp(session.getDeviceId(), dstIp, dstPort, session.getSsrc());
-                                } else {
-                                    log.error("Failed to parse audio destination IP/Port from device SDP.");
-                                }
+                            if (dstIp != null && dstPort > 0) {
+                                triggerZlmStartSendRtp(session.getDeviceId(), dstIp, dstPort, session.getSsrc());
+                            } else {
+                                log.error("Failed to parse audio destination IP/Port from device SDP.");
                             }
                         }
                     }
@@ -560,7 +562,7 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
             log.info("Intercom device transport mode: isTcp={}, tcpMode={}, dstIp={}, dstPort={}", isTcp, tcpMode, dstIp, dstPort);
             
             // 2. 创建 ZLMediaKit RTP 接收端口服务
-            String ssrcHex = Long.toHexString(Long.parseLong(session.getSsrc())).toUpperCase();
+            String ssrcHex = String.format("%08X", Long.parseLong(session.getSsrc()));
             MK_RTP_SERVER mkRtpServer = zlmApi.mk_rtp_server_create2((short) session.getRtpPort(), tcpMode, hikStreamProperties.getDomain(), "rtp", ssrcHex);
             if (mkRtpServer == null) {
                 log.error("Failed to create ZLMediaKit RTP server for intercom.");
@@ -620,10 +622,9 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
             serverTransaction.sendResponse(response);
             log.info("Sent 200 OK for incoming GB28181 intercom INVITE");
             
-            // 5. TCP 主动模式：ZLM 主动连接设备 RTP 端口（接收设备推流用，与推流无关）
-            if (tcpMode == 2) {
-                zlmApi.mk_rtp_server_connect(mkRtpServer, dstIp, (short) dstPort, null, null);
-                log.info("ZLM TCP active mode: connected to {}:{}", dstIp, dstPort);
+            // 5. TCP 主动模式：ZLM 主动连接设备 RTP 端口
+            if (tcpMode == 2 && dstIp != null && dstPort > 0) {
+                connectRtpServerToDevice(mkRtpServer, dstIp, (short) dstPort, true);
             }
 
             // 6. 等待浏览器 WebRTC 推流就绪后再触发 ZLM 推流到设备
@@ -717,14 +718,84 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
     }
 
     private String getResolvedDstIp(String parsedIp, String deviceId) {
-        GbDevice device = deviceMapper.selectByDeviceId(deviceId);
-        if (device != null && device.getIp() != null && !device.getIp().isEmpty()) {
-            if (!device.getIp().equals(parsedIp)) {
-                log.info("Overriding destination IP {} with registered device IP {} for device {}", parsedIp, device.getIp(), deviceId);
-            }
-            return device.getIp();
+        return resolveMediaDstIp(parsedIp, deviceId);
+    }
+
+    /** 媒体连接优先使用 SDP 中的 IP，无效时回退到设备注册地址 */
+    private String resolveMediaDstIp(String sdpIp, String deviceId) {
+        if (sdpIp != null && !sdpIp.isEmpty() && !"0.0.0.0".equals(sdpIp)) {
+            return sdpIp;
         }
-        return parsedIp;
+        GbDevice device = deviceMapper.selectByDeviceId(deviceId);
+        if (device != null) {
+            if (device.getSdpIp() != null && !device.getSdpIp().isEmpty()) {
+                return device.getSdpIp();
+            }
+            if (device.getIp() != null && !device.getIp().isEmpty()) {
+                return device.getIp();
+            }
+        }
+        return sdpIp;
+    }
+
+    private boolean isTcpMedia(String sdp, String mediaType) {
+        for (String line : sdp.split("\n")) {
+            line = line.trim();
+            if (line.startsWith("m=" + mediaType) && line.contains("TCP")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String parseSetupFromSdp(String sdp) {
+        for (String line : sdp.split("\n")) {
+            line = line.trim();
+            if (line.startsWith("a=setup:")) {
+                return line.substring(8).trim();
+            }
+        }
+        return "";
+    }
+
+    /** 根据设备 SDP 或库中 streamMode 判断平台是否应主动 TCP 连接设备 */
+    private boolean shouldPlatformConnectTcp(String responseSdp, GbDevice device, String mediaType) {
+        if (isTcpMedia(responseSdp, mediaType)) {
+            String setup = parseSetupFromSdp(responseSdp);
+            if ("passive".equalsIgnoreCase(setup)) {
+                return true;
+            }
+            if ("active".equalsIgnoreCase(setup)) {
+                return false;
+            }
+        }
+        return device != null && "TCP-PASSIVE".equalsIgnoreCase(device.getStreamMode());
+    }
+
+    /**
+     * 平台主动连接设备 RTP TCP 端口；国标要求 ACK 前完成首次连接，失败则后台重试。
+     */
+    private void connectRtpServerToDevice(MK_RTP_SERVER rtpServer, String dstIp, int dstPort, boolean scheduleRetry) {
+        log.info("GB28181 TCP connect to {}:{}", dstIp, dstPort);
+        zlmApi.mk_rtp_server_connect(rtpServer, dstIp, (short) dstPort, null, null);
+
+        if (!scheduleRetry) {
+            return;
+        }
+        Thread retryThread = new Thread(() -> {
+            for (int i = 1; i <= 7; i++) {
+                try {
+                    Thread.sleep(300);
+                    log.info("GB28181 TCP connect retry {}/7 to {}:{}", i, dstIp, dstPort);
+                    zlmApi.mk_rtp_server_connect(rtpServer, dstIp, (short) dstPort, null, null);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        }, "gb-rtp-tcp-" + dstPort);
+        retryThread.setDaemon(true);
+        retryThread.start();
     }
 
     private int parsePortFromSdp(String sdp, String mediaType) {

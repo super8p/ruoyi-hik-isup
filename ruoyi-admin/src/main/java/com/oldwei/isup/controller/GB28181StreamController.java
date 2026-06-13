@@ -134,6 +134,23 @@ public class GB28181StreamController {
             int maxRetries = 15;
             int retryCount = 0;
             while (retryCount < maxRetries) {
+                // For play type, pre-check if the stream actually exists in ZLM to avoid JNA timeout
+                if ("play".equalsIgnoreCase(type)) {
+                    com.aizuda.zlm4j.structure.MK_MEDIA_SOURCE ctx = zlmApi.mk_media_source_find2("rtp", "__defaultVhost__", app, stream, 0);
+                    if (ctx == null) {
+                        ctx = zlmApi.mk_media_source_find2("rtsp", "__defaultVhost__", app, stream, 0);
+                    }
+                    if (ctx == null) {
+                        ctx = zlmApi.mk_media_source_find2("rtmp", "__defaultVhost__", app, stream, 0);
+                    }
+                    if (ctx == null) {
+                        retryCount++;
+                        log.info("GB28181 webrtcSdp: stream {} not found in ZLM yet, waiting for push ({}/{})", stream, retryCount, maxRetries);
+                        Thread.sleep(500);
+                        continue;
+                    }
+                }
+
                 CompletableFuture<String> future = new CompletableFuture<>();
                 IMKWebRtcGetAnwerSdpCallBack callback = new IMKWebRtcGetAnwerSdpCallBack() {
                     @Override
