@@ -32,6 +32,10 @@ public class SipRegisterHandler {
     @org.springframework.beans.factory.annotation.Autowired
     private com.oldwei.isup.sdk.gb28181.SipSender sipSender;
 
+    @org.springframework.context.annotation.Lazy
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.oldwei.isup.sdk.service.impl.FRegisterCallBack fRegisterCallBack;
+
     private static final java.util.concurrent.ExecutorService catalogExecutor = 
         java.util.concurrent.Executors.newFixedThreadPool(2);
 
@@ -133,6 +137,11 @@ public class SipRegisterHandler {
                 // ② 注销时从超时检测中移除（对标 wvp cleanOfflineDevice）
                 deviceStatusManager.remove(deviceId);
                 log.info("Device {} logged out successfully.", deviceId);
+                try {
+                    fRegisterCallBack.notifyXiaoanOnlineStatus(deviceId, "offline", 1);
+                } catch (Exception e) {
+                    log.error("Failed to notify Xiaoan about GB28181 device offline (logout) status", e);
+                }
             } else {
                 device.setOnLine(true);
                 device.setIp(deviceIp);
@@ -151,6 +160,11 @@ public class SipRegisterHandler {
                 long expiresMs = Math.min(expires, (long) hbInterval * hbCount) * 1000L;
                 deviceStatusManager.add(deviceId, expiresMs + System.currentTimeMillis());
                 log.info("Device {} registered successfully from {}:{}, heartbeat timeout={}ms.", deviceId, deviceIp, devicePort, expiresMs);
+                try {
+                    fRegisterCallBack.notifyXiaoanOnlineStatus(deviceId, "online", 1);
+                } catch (Exception e) {
+                    log.error("Failed to notify Xiaoan about GB28181 device online status", e);
+                }
             }
 
             try {

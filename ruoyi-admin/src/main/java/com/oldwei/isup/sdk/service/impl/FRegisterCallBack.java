@@ -20,6 +20,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.Optional;
+import com.oldwei.isup.mapper.GbDeviceChannelMapper;
+import com.oldwei.isup.model.GbDeviceChannel;
+import java.util.List;
+
 
 @Slf4j
 @Service
@@ -33,6 +37,7 @@ public class FRegisterCallBack implements DEVICE_REGISTER_CB {
     private final ISAPIService isapiService;
     private final CmsUtil cmsUtil;
     private final IMediaStreamService mediaStreamService;
+    private final GbDeviceChannelMapper gbDeviceChannelMapper;
 
     @Override
     public boolean invoke(int lUserID, int dwDataType, Pointer pOutBuffer, int dwOutLen, Pointer pInBuffer, int dwInLen, Pointer pUser) {
@@ -207,6 +212,51 @@ public class FRegisterCallBack implements DEVICE_REGISTER_CB {
     }
 
     public void notifyXiaoanOnlineStatus(String deviceId, String event) {
+        notifyXiaoanOnlineStatus(deviceId, event, 2);
+    }
+
+    public void notifyXiaoanOnlineStatus(String deviceId, String event, Integer deviceType) {
+        if (hikPlatformProperties == null) {
+            return;
+        }
+        String xiaoanUrl = hikPlatformProperties.getXiaoanNotifyUrl();
+        if (org.apache.commons.lang3.StringUtils.isBlank(xiaoanUrl) || org.apache.commons.lang3.StringUtils.isBlank(deviceId)) {
+            return;
+        }
+
+        if (deviceType != null && deviceType == 1 && gbDeviceChannelMapper != null) {
+            try {
+                List<GbDeviceChannel> channels = gbDeviceChannelMapper.selectListByDeviceId(deviceId);
+                if (channels != null && !channels.isEmpty()) {
+                    for (GbDeviceChannel channel : channels) {
+                        notifyXiaoanOnlineStatus(deviceId, channel.getGbDeviceId(), event, deviceType);
+                    }
+                    return;
+                }
+            } catch (Exception e) {
+                log.error("Failed to query channels for GB28181 device " + deviceId, e);
+            }
+        } else if (deviceType != null && deviceType == 2 && deviceCacheService != null) {
+            try {
+                Optional<Device> deviceOpt = deviceCacheService.getByDeviceId(deviceId);
+                if (deviceOpt.isPresent()) {
+                    List<Device.Channel> channels = deviceOpt.get().getChannels();
+                    if (channels != null && !channels.isEmpty()) {
+                        for (Device.Channel channel : channels) {
+                            notifyXiaoanOnlineStatus(deviceId, String.valueOf(channel.getChannelId()), event, deviceType);
+                        }
+                        return;
+                    }
+                }
+            } catch (Exception e) {
+                log.error("Failed to query channels for ISUP device " + deviceId, e);
+            }
+        }
+
+        notifyXiaoanOnlineStatus(deviceId, null, event, deviceType);
+    }
+
+    public void notifyXiaoanOnlineStatus(String deviceId, String channelId, String event, Integer deviceType) {
         if (hikPlatformProperties == null) {
             return;
         }
@@ -217,12 +267,16 @@ public class FRegisterCallBack implements DEVICE_REGISTER_CB {
         String targetUrl = xiaoanUrl + "/onOrOffLine";
         java.util.Map<String, Object> payload = new java.util.HashMap<>();
         payload.put("Event", event);
-        
+        payload.put("DeviceType", deviceType);
+
         java.util.Map<String, Object> deviceInfo = new java.util.HashMap<>();
         deviceInfo.put("SerialNum", deviceId);
         deviceInfo.put("Name", deviceId);
+        if (org.apache.commons.lang3.StringUtils.isNotBlank(channelId)) {
+            deviceInfo.put("ChannelId", channelId);
+        }
         payload.put("DeviceInfo", deviceInfo);
-        
+
         com.oldwei.isup.util.WebFluxHttpUtil.postAsync(targetUrl, payload, String.class).subscribe(
             resp -> log.info("Xiaoan onOrOffLine notification success ({}): {}", event, resp),
             err -> log.error("Xiaoan onOrOffLine notification error ({}): {}", event, err.getMessage())

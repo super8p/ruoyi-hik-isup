@@ -24,6 +24,10 @@ public class DeviceStatusManager {
 
     private final GbDeviceMapper deviceMapper;
 
+    @org.springframework.context.annotation.Lazy
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.oldwei.isup.sdk.service.impl.FRegisterCallBack fRegisterCallBack;
+
     /**
      * key: deviceId, value: 预计过期时间戳(ms)
      * 每次收到心跳时调用 {@link #add} 刷新；超时后定时任务将设备标为离线
@@ -81,6 +85,11 @@ public class DeviceStatusManager {
             try {
                 deviceMapper.updateOnlineStatus(deviceId, false);
                 log.info("[心跳超时] 设备 {} 已标记为离线 (keepalive timeout at {})", deviceId, nowStr);
+                try {
+                    fRegisterCallBack.notifyXiaoanOnlineStatus(deviceId, "offline", 1);
+                } catch (Exception e) {
+                    log.error("Failed to notify Xiaoan about GB28181 device offline status", e);
+                }
             } catch (Exception e) {
                 log.error("[心跳超时] 更新设备 {} 离线状态失败", deviceId, e);
             }

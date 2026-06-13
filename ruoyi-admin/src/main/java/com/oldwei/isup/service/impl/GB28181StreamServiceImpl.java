@@ -122,7 +122,7 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
 
         try {
             // 1. 生成 10 位 SSRC (Live 视频首位为 0)
-            String ssrcSeq = String.format("%05d", (int) (Math.random() * 100000));
+            String ssrcSeq = String.format("%04d", (int) (Math.random() * 10000));
             String ssrc = "0" + sipConfig.getId().substring(3, 8) + ssrcSeq;
             String ssrcHex = Long.toHexString(Long.parseLong(ssrc)).toUpperCase();
 
@@ -133,13 +133,13 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
 
             String streamMode = device.getStreamMode();
             if ("TCP-PASSIVE".equalsIgnoreCase(streamMode)) {
-                tcpMode = 1;
-                mLine = "m=video " + rtpPort + " TCP/RTP/AVP 96\r\n";
-                aSetup = "a=setup:passive\r\n";
-            } else if ("TCP-ACTIVE".equalsIgnoreCase(streamMode)) {
                 tcpMode = 2;
                 mLine = "m=video " + rtpPort + " TCP/RTP/AVP 96\r\n";
                 aSetup = "a=setup:active\r\n";
+            } else if ("TCP-ACTIVE".equalsIgnoreCase(streamMode)) {
+                tcpMode = 1;
+                mLine = "m=video " + rtpPort + " TCP/RTP/AVP 96\r\n";
+                aSetup = "a=setup:passive\r\n";
             }
 
             // 在 ZLMediaKit 创建 RTP 服务接收端口，根据 tcpMode 进行绑定
@@ -301,79 +301,21 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
 
         try {
             // 3. 生成 10 位 SSRC (对讲首位为 0)
-            String ssrcSeq = String.format("%05d", (int) (Math.random() * 100000));
+            String ssrcSeq = String.format("%04d", (int) (Math.random() * 10000));
             String ssrc = "0" + sipConfig.getId().substring(3, 8) + ssrcSeq;
-
-            // 4. 构建音频 SDP，定义 PCMA/8000 双向/单向流协商
-            String sdp = "v=0\n" +
-                    "o=" + sipConfig.getId() + " 0 0 IN IP4 " + sipConfig.getIp() + "\n" +
-                    "s=Play\n" +
-                    "c=IN IP4 " + sipConfig.getIp() + "\n" +
-                    "t=0 0\n" +
-                    "m=audio " + rtpPort + " RTP/AVP 8\n" +
-                    "a=rtpmap:8 PCMA/8000\n" +
-                    "a=sendrecv\n" +
-                    "y=" + ssrc + "\n";
-
-            // 5. 构建 SIP INVITE
-            SipProvider provider = "tcp".equalsIgnoreCase(device.getTransport()) ? 
-                    sipListener.getTcpProvider() : sipListener.getUdpProvider();
-            AddressFactory addressFactory = GB28181SipListener.getAddressFactory();
-            HeaderFactory headerFactory = GB28181SipListener.getHeaderFactory();
-            MessageFactory messageFactory = GB28181SipListener.getMessageFactory();
-
-            SipURI requestUri = addressFactory.createSipURI(channelId, device.getIp() + ":" + device.getPort());
-            CallIdHeader callIdHeader = provider.getNewCallId();
-            CSeqHeader cSeqHeader = headerFactory.createCSeqHeader(1L, Request.INVITE);
-
-            SipURI fromUri = addressFactory.createSipURI(sipConfig.getId(), sipConfig.getIp() + ":" + sipConfig.getPort());
-            Address fromAddress = addressFactory.createAddress(fromUri);
-            FromHeader fromHeader = headerFactory.createFromHeader(fromAddress, UUID.randomUUID().toString().replace("-", ""));
-
-            SipURI toUri = addressFactory.createSipURI(channelId, device.getIp() + ":" + device.getPort());
-            Address toAddress = addressFactory.createAddress(toUri);
-            ToHeader toHeader = headerFactory.createToHeader(toAddress, null);
-
-            SipURI contactUri = addressFactory.createSipURI(sipConfig.getId(), sipConfig.getIp() + ":" + sipConfig.getPort());
-            Address contactAddress = addressFactory.createAddress(contactUri);
-            ContactHeader contactHeader = headerFactory.createContactHeader(contactAddress);
-
-            MaxForwardsHeader maxForwards = headerFactory.createMaxForwardsHeader(70);
-
-            ArrayList<ViaHeader> viaHeaders = new ArrayList<>();
-            ViaHeader viaHeader = headerFactory.createViaHeader(sipConfig.getIp(), sipConfig.getPort(), device.getTransport(), null);
-            viaHeaders.add(viaHeader);
-
-            Request request = messageFactory.createRequest(requestUri, Request.INVITE, callIdHeader, cSeqHeader, 
-                    fromHeader, toHeader, viaHeaders, maxForwards);
-            request.addHeader(contactHeader);
-
-            // 对讲的 Subject 后缀为 2
-            Header subjectHeader = headerFactory.createHeader("Subject", channelId + ":" + ssrc + ",2");
-            request.addHeader(subjectHeader);
-
-            ContentTypeHeader contentTypeHeader = headerFactory.createContentTypeHeader("application", "sdp");
-            request.setContent(sdp, contentTypeHeader);
-
-            ClientTransaction transaction = provider.getNewClientTransaction(request);
 
             GB28181Session session = new GB28181Session();
             session.setDeviceId(deviceId);
             session.setChannelId(channelId);
             session.setRtpPort(rtpPort);
-            session.setCallId(callIdHeader.getCallId());
             session.setSsrc(ssrc);
-            session.setDialog(transaction.getDialog());
             session.setTalk(true);
 
-            sessions.put(callIdHeader.getCallId(), session);
             sessions.put(sessionKey, session);
-
-            transaction.sendRequest();
-            log.info("Sent INVITE for GB28181 talk: device={}, channel={}, rtpPort={}, ssrc={}", deviceId, channelId, rtpPort, ssrc);
+            log.info("Initialized GB28181 talk session state for: {}, waiting for incoming INVITE from device.", sessionKey);
 
         } catch (Exception e) {
-            log.error("Failed to start GB28181 talkback", e);
+            log.error("Failed to initialize GB28181 talkback session", e);
             releaseRtpPort(rtpPort);
         }
     }
@@ -415,6 +357,9 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
             log.error("Failed to send BYE for talk session " + sessionKey, e);
         } finally {
             triggerZlmStopSendRtp(deviceId);
+            if (session.getRtpServer() != null) {
+                zlmApi.mk_rtp_server_release(session.getRtpServer());
+            }
             releaseRtpPort(session.getRtpPort());
             log.info("Stopped GB28181 talk session and released resources: {}", sessionKey);
         }
@@ -476,6 +421,24 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
                             String ssrcHex = Long.toHexString(Long.parseLong(session.getSsrc())).toUpperCase();
                             log.info("[GB28181预览] INVITE 200 OK，ssrc={}, ssrcHex={}, ZLM流为 rtp/{}",
                                     session.getSsrc(), ssrcHex, ssrcHex);
+
+                            // TCP-PASSIVE 模式下，平台主动连接设备
+                            GbDevice device = deviceMapper.selectByDeviceId(session.getDeviceId());
+                            if (device != null && "TCP-PASSIVE".equalsIgnoreCase(device.getStreamMode())) {
+                                byte[] rawContent = response.getRawContent();
+                                if (rawContent != null && rawContent.length > 0) {
+                                    String responseSdp = new String(rawContent, "UTF-8");
+                                    String dstIp = parseIpFromSdp(responseSdp);
+                                    int dstPort = parsePortFromSdp(responseSdp, "video");
+                                    if (dstIp != null && dstPort > 0) {
+                                        log.info("TCP-PASSIVE mode: Connecting ZLM RTP server to device {}:{}", dstIp, dstPort);
+                                        zlmApi.mk_rtp_server_connect(session.getRtpServer(), dstIp, (short) dstPort, null, null);
+                                    } else {
+                                        log.error("Failed to parse device video IP/Port from SDP for TCP-PASSIVE connection.");
+                                    }
+                                }
+                            }
+
                             session.getSsrcFuture().complete(ssrcHex);
                         }
 
@@ -487,7 +450,7 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
                                 log.info("Intercom device SDP response:\n{}", responseSdp);
 
                                 String dstIp = parseIpFromSdp(responseSdp);
-                                int dstPort = parsePortFromSdp(responseSdp);
+                                int dstPort = parsePortFromSdp(responseSdp, "audio");
 
                                 if (dstIp != null && dstPort > 0) {
                                     triggerZlmStartSendRtp(session.getDeviceId(), dstIp, dstPort, session.getSsrc());
@@ -517,6 +480,176 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
         }
     }
 
+    public void handleInviteRequest(RequestEvent requestEvent) {
+        Request request = requestEvent.getRequest();
+        SipProvider provider = (SipProvider) requestEvent.getSource();
+        
+        try {
+            FromHeader fromHeader = (FromHeader) request.getHeader(FromHeader.NAME);
+            String deviceId = ((SipURI) fromHeader.getAddress().getURI()).getUser();
+            String sessionKey = deviceId + "_talk";
+            
+            GB28181Session session = sessions.get(sessionKey);
+            if (session == null) {
+                log.warn("Received unexpected INVITE from device {}, no active talk session. Rejecting with 481.", deviceId);
+                Response response = GB28181SipListener.getMessageFactory().createResponse(481, request);
+                sendResponse(provider, requestEvent, response);
+                return;
+            }
+            
+            // 1. 解析设备 SDP
+            byte[] rawContent = request.getRawContent();
+            if (rawContent == null || rawContent.length == 0) {
+                log.warn("Received device INVITE without SDP, rejecting.");
+                Response response = GB28181SipListener.getMessageFactory().createResponse(400, request);
+                sendResponse(provider, requestEvent, response);
+                return;
+            }
+            String deviceSdp = new String(rawContent, "UTF-8");
+            log.info("Received device INVITE SDP for intercom:\n{}", deviceSdp);
+            
+            String dstIp = parseIpFromSdp(deviceSdp);
+            int dstPort = parsePortFromSdp(deviceSdp, "audio");
+            
+            // 解析传输协议和 TCP 主被动模式
+            int tcpMode = 0; // 默认 UDP
+            boolean isTcp = false;
+            String aSetup = "";
+            
+            for (String line : deviceSdp.split("\n")) {
+                line = line.trim();
+                if (line.startsWith("m=audio")) {
+                    if (line.contains("TCP")) {
+                        isTcp = true;
+                    }
+                }
+                if (line.startsWith("a=setup:")) {
+                    aSetup = line.substring(8);
+                }
+            }
+            
+            if (isTcp) {
+                if ("active".equalsIgnoreCase(aSetup)) {
+                    tcpMode = 1; // ZLM 做 TCP Server (passive)
+                } else if ("passive".equalsIgnoreCase(aSetup)) {
+                    tcpMode = 2; // ZLM 做 TCP Client (active)
+                }
+            }
+            
+            log.info("Intercom device transport mode: isTcp={}, tcpMode={}, dstIp={}, dstPort={}", isTcp, tcpMode, dstIp, dstPort);
+            
+            // 2. 创建 ZLMediaKit RTP 接收端口服务
+            String ssrcHex = Long.toHexString(Long.parseLong(session.getSsrc())).toUpperCase();
+            MK_RTP_SERVER mkRtpServer = zlmApi.mk_rtp_server_create2((short) session.getRtpPort(), tcpMode, hikStreamProperties.getDomain(), "rtp", ssrcHex);
+            if (mkRtpServer == null) {
+                log.error("Failed to create ZLMediaKit RTP server for intercom.");
+                Response response = GB28181SipListener.getMessageFactory().createResponse(500, request);
+                sendResponse(provider, requestEvent, response);
+                return;
+            }
+            session.setRtpServer(mkRtpServer);
+            
+            // 3. 创建 ServerTransaction 绑定 Dialog
+            ServerTransaction serverTransaction = requestEvent.getServerTransaction();
+            if (serverTransaction == null) {
+                serverTransaction = provider.getNewServerTransaction(request);
+            }
+            session.setDialog(serverTransaction.getDialog());
+            
+            // 绑定 CallId
+            CallIdHeader callIdHeader = (CallIdHeader) request.getHeader(CallIdHeader.NAME);
+            session.setCallId(callIdHeader.getCallId());
+            sessions.put(callIdHeader.getCallId(), session);
+            
+            // 4. 构造我们的 SDP Response
+            String localSdp = "v=0\r\n" +
+                    "o=" + sipConfig.getId() + " 0 0 IN IP4 " + sipConfig.getIp() + "\r\n" +
+                    "s=Play\r\n" +
+                    "c=IN IP4 " + sipConfig.getIp() + "\r\n" +
+                    "t=0 0\r\n";
+            
+            if (isTcp) {
+                localSdp += "m=audio " + session.getRtpPort() + " TCP/RTP/AVP 8\r\n" +
+                        "a=setup:" + (tcpMode == 1 ? "passive" : "active") + "\r\n";
+            } else {
+                localSdp += "m=audio " + session.getRtpPort() + " RTP/AVP 8\r\n";
+            }
+            
+            localSdp += "a=rtpmap:8 PCMA/8000\r\n" +
+                    "a=sendonly\r\n" +
+                    "y=" + session.getSsrc() + "\r\n";
+            
+            log.info("Responding to device INVITE with local SDP:\n{}", localSdp);
+            
+            Response response = GB28181SipListener.getMessageFactory().createResponse(Response.OK, request);
+            
+            // 添加 Contact
+            AddressFactory addressFactory = GB28181SipListener.getAddressFactory();
+            javax.sip.address.SipURI contactUri = addressFactory.createSipURI(sipConfig.getId(), sipConfig.getIp() + ":" + sipConfig.getPort());
+            javax.sip.address.Address contactAddress = addressFactory.createAddress(contactUri);
+            javax.sip.header.ContactHeader contactHeader = GB28181SipListener.getHeaderFactory().createContactHeader(contactAddress);
+            response.addHeader(contactHeader);
+            
+            // 添加 Content-Type
+            javax.sip.header.ContentTypeHeader contentTypeHeader = GB28181SipListener.getHeaderFactory().createContentTypeHeader("application", "sdp");
+            response.setContent(localSdp, contentTypeHeader);
+            
+            serverTransaction.sendResponse(response);
+            log.info("Sent 200 OK for incoming GB28181 intercom INVITE");
+            
+            // 5. 触发 ZLMediaKit 连接/发流
+            if (tcpMode == 2) {
+                zlmApi.mk_rtp_server_connect(mkRtpServer, dstIp, (short) dstPort, null, null);
+                log.info("ZLM TCP active mode: connected to {}:{}", dstIp, dstPort);
+            }
+            
+            // 无论 UDP 还是 TCP，我们都要开始推流
+            if (dstIp != null && dstPort > 0) {
+                triggerZlmStartSendRtp(deviceId, dstIp, dstPort, session.getSsrc(), !isTcp);
+            }
+            
+        } catch (Exception e) {
+            log.error("Failed to handle incoming GB28181 intercom INVITE", e);
+            try {
+                Response response = GB28181SipListener.getMessageFactory().createResponse(500, request);
+                sendResponse(provider, requestEvent, response);
+            } catch (Exception ignored) {}
+        }
+    }
+
+    public void handleAckRequest(RequestEvent requestEvent) {
+        log.info("Received SIP Request: ACK for intercom");
+    }
+
+    public void handleByeRequest(RequestEvent requestEvent) {
+        Request request = requestEvent.getRequest();
+        SipProvider provider = (SipProvider) requestEvent.getSource();
+        try {
+            FromHeader fromHeader = (FromHeader) request.getHeader(FromHeader.NAME);
+            String deviceId = ((SipURI) fromHeader.getAddress().getURI()).getUser();
+            log.info("Received BYE from device: {} to stop intercom", deviceId);
+            
+            Response response = GB28181SipListener.getMessageFactory().createResponse(Response.OK, request);
+            sendResponse(provider, requestEvent, response);
+            
+            stopTalk(deviceId, null);
+        } catch (Exception e) {
+            log.error("Failed to handle incoming BYE request", e);
+        }
+    }
+
+    private void sendResponse(SipProvider provider, RequestEvent requestEvent, Response response) {
+        try {
+            ServerTransaction serverTransaction = requestEvent.getServerTransaction();
+            if (serverTransaction == null) {
+                serverTransaction = provider.getNewServerTransaction(requestEvent.getRequest());
+            }
+            serverTransaction.sendResponse(response);
+        } catch (Exception e) {
+            log.error("Failed to send response", e);
+        }
+    }
+
     private String parseIpFromSdp(String sdp) {
         for (String line : sdp.split("\n")) {
             line = line.trim();
@@ -530,10 +663,10 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
         return null;
     }
 
-    private int parsePortFromSdp(String sdp) {
+    private int parsePortFromSdp(String sdp, String mediaType) {
         for (String line : sdp.split("\n")) {
             line = line.trim();
-            if (line.startsWith("m=audio")) {
+            if (line.startsWith("m=" + mediaType)) {
                 String[] parts = line.split("\\s+");
                 if (parts.length >= 2) {
                     try {
@@ -548,6 +681,10 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
     }
 
     private void triggerZlmStartSendRtp(String deviceId, String dstIp, int dstPort, String ssrc) {
+        triggerZlmStartSendRtp(deviceId, dstIp, dstPort, ssrc, true);
+    }
+
+    private void triggerZlmStartSendRtp(String deviceId, String dstIp, int dstPort, String ssrc, boolean isUdp) {
         long ssrcLong = Long.parseLong(ssrc);
         String ssrcHex = Long.toHexString(ssrcLong).toUpperCase();
 
@@ -560,11 +697,11 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
         params.put("dst_url", dstIp);
         params.put("dst_port", dstPort);
         params.put("ssrc", ssrcHex);
-        params.put("is_udp", 1);
+        params.put("is_udp", isUdp ? 1 : 0);
         params.put("pt", 8); // PCMA 音频格式 PayloadType 8
         params.put("use_ps", 0); // 直接推 PCMA 音频 ES 流，不要封装为 PS
 
-        log.info("Triggering ZLMediaKit startSendRtp to {}:{} SSRC:{}", dstIp, dstPort, ssrcHex);
+        log.info("Triggering ZLMediaKit startSendRtp to {}:{} SSRC:{} isUdp:{}", dstIp, dstPort, ssrcHex, isUdp);
         WebFluxHttpUtil.postAsync(zlmUrl, params, String.class).subscribe(
                 resp -> log.info("ZLMediaKit startSendRtp success: {}", resp),
                 err -> log.error("ZLMediaKit startSendRtp error: {}", err.getMessage())

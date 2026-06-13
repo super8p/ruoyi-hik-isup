@@ -28,6 +28,7 @@ public class ScheduledTask {
     private final DeviceCacheService deviceCacheService;
     private final ISAPIService isapiService;
     private final FRegisterCallBack fRegisterCallBack;
+    private final com.oldwei.isup.mapper.GbDeviceMapper gbDeviceMapper;
 
     // Cron表达式范例：
     //
@@ -226,17 +227,33 @@ public class ScheduledTask {
                 .filter(d -> d.getLoginId() != null && d.getLoginId() > -1)
                 .collect(Collectors.toList());
         
-        if (onlineDevices.isEmpty()) {
+        List<com.oldwei.isup.model.GbDevice> onlineGbDevices = new java.util.ArrayList<>();
+        try {
+            com.oldwei.isup.model.GbDevice query = new com.oldwei.isup.model.GbDevice();
+            query.setOnLine(true);
+            onlineGbDevices = gbDeviceMapper.selectList(query);
+        } catch (Exception e) {
+            log.error("获取在线国标设备列表失败", e);
+        }
+
+        if (onlineDevices.isEmpty() && onlineGbDevices.isEmpty()) {
             log.debug("没有在线设备，无需发送保活心跳到消安");
             return;
         }
 
-        log.info("开始发送保活心跳到消安，在线设备数: {}", onlineDevices.size());
+        log.info("开始发送保活心跳到消安，在线海康设备数: {}, 在线国标设备数: {}", onlineDevices.size(), onlineGbDevices.size());
         for (Device device : onlineDevices) {
             try {
                 fRegisterCallBack.notifyXiaoanOnlineStatus(device.getDeviceId(), "online");
             } catch (Exception e) {
                 log.error("向消安发送设备 {} 保活心跳失败", device.getDeviceId(), e);
+            }
+        }
+        for (com.oldwei.isup.model.GbDevice gbDevice : onlineGbDevices) {
+            try {
+                fRegisterCallBack.notifyXiaoanOnlineStatus(gbDevice.getDeviceId(), "online", 1);
+            } catch (Exception e) {
+                log.error("向消安发送国标设备 {} 保活心跳失败", gbDevice.getDeviceId(), e);
             }
         }
     }

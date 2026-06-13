@@ -187,6 +187,7 @@ public class AlarmMsgCallBack implements EHomeMsgCallBack {
             String targetUrl = xiaoanUrl + "/warning";
             java.util.Map<String, Object> payload = new java.util.HashMap<>();
             payload.put("DeviceId", devId);
+            payload.put("DeviceType", 2);
             if (StringUtils.isNotBlank(pictureUrl)) {
                 payload.put("PictureUrl", pictureUrl);
             }
@@ -201,6 +202,7 @@ public class AlarmMsgCallBack implements EHomeMsgCallBack {
             String targetUrl = xiaoanUrl + "/warningComplete";
             java.util.Map<String, Object> payload = new java.util.HashMap<>();
             payload.put("DeviceId", devId);
+            payload.put("DeviceType", 2);
             if (StringUtils.isNotBlank(pictureUrl)) {
                 payload.put("PictureUrl", pictureUrl);
             }

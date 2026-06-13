@@ -59,6 +59,7 @@ public class GbAlarmNotifyService {
             String targetUrl = xiaoanUrl + "/warning";
             Map<String, Object> payload = new HashMap<>();
             payload.put("DeviceId", alarm.getDeviceId());
+            payload.put("DeviceType", 1);
             payload.put("AlarmType", mappedType);
             payload.put("AlarmDescription", alarmDesc != null ? alarmDesc : "GB28181 Alarm");
             payload.put("AlarmTime", alarm.getAlarmTime());
@@ -71,6 +72,7 @@ public class GbAlarmNotifyService {
             String targetUrl = xiaoanUrl + "/warningComplete";
             Map<String, Object> payload = new HashMap<>();
             payload.put("DeviceId", alarm.getDeviceId());
+            payload.put("DeviceType", 1);
             payload.put("AlarmType", mappedType);
             payload.put("AlarmDescription", alarmDesc != null ? alarmDesc : "GB28181 Alarm Restored");
             payload.put("AlarmTime", alarm.getAlarmTime());

@@ -49,6 +49,10 @@ public class SipMessageHandler {
     private final DeviceStatusManager deviceStatusManager;
     private final org.springframework.transaction.PlatformTransactionManager transactionManager;
 
+    @org.springframework.context.annotation.Lazy
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.oldwei.isup.sdk.service.impl.FRegisterCallBack fRegisterCallBack;
+
     /**
      * 心跳批量入库队列（对标 wvp KeepaliveNotifyMessageHandler.taskQueue）
      * 收到心跳后先放队列，每10秒批量写库，避免高频写数据库
@@ -176,6 +180,11 @@ public class SipMessageHandler {
             log.info("[心跳] 离线设备 {} 收到心跳，恢复上线", deviceId);
             device.setOnLine(true);
             deviceMapper.updateOnlineStatus(deviceId, true);
+            try {
+                fRegisterCallBack.notifyXiaoanOnlineStatus(deviceId, "online", 1);
+            } catch (Exception e) {
+                log.error("Failed to notify Xiaoan about GB28181 device online status", e);
+            }
         }
 
         // ③ 更新心跳时间并放入批量队列（延迟10秒写库）
@@ -515,12 +524,22 @@ public class SipMessageHandler {
             for (GbDeviceChannel staleChannel : dbChannelMap.values()) {
                 channelMapper.deleteByChannelId(staleChannel.getGbDeviceId());
                 log.info("Deleted stale GB28181 channel: {} of device: {}", staleChannel.getGbDeviceId(), deviceId);
+                try {
+                    fRegisterCallBack.notifyXiaoanOnlineStatus(deviceId, staleChannel.getGbDeviceId(), "offline", 1);
+                } catch (Exception ex) {
+                    log.error("Failed to notify Xiaoan about stale channel offline status: " + staleChannel.getGbDeviceId(), ex);
+                }
             }
 
             // Insert new ones
             for (GbDeviceChannel channel : toInsert) {
                 try {
                     channelMapper.insert(channel);
+                    try {
+                        fRegisterCallBack.notifyXiaoanOnlineStatus(deviceId, channel.getGbDeviceId(), "online", 1);
+                    } catch (Exception ex) {
+                        log.error("Failed to notify Xiaoan about new channel online status: " + channel.getGbDeviceId(), ex);
+                    }
                 } catch (Exception e) {
                     log.error("Failed to insert channel: " + channel.getGbDeviceId(), e);
                 }
@@ -530,6 +549,11 @@ public class SipMessageHandler {
             for (GbDeviceChannel channel : toUpdate) {
                 try {
                     channelMapper.update(channel);
+                    try {
+                        fRegisterCallBack.notifyXiaoanOnlineStatus(deviceId, channel.getGbDeviceId(), "online", 1);
+                    } catch (Exception ex) {
+                        log.error("Failed to notify Xiaoan about updated channel online status: " + channel.getGbDeviceId(), ex);
+                    }
                 } catch (Exception e) {
                     log.error("Failed to update channel: " + channel.getGbDeviceId(), e);
                 }

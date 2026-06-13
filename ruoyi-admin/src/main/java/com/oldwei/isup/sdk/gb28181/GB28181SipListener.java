@@ -190,6 +190,12 @@ public class GB28181SipListener implements SipListener, InitializingBean, Dispos
                     registerHandler.handle(requestEvent);
                 } else if (Request.MESSAGE.equals(method)) {
                     messageHandler.handle(requestEvent);
+                } else if (Request.INVITE.equals(method)) {
+                    streamService.handleInviteRequest(requestEvent);
+                } else if (Request.ACK.equals(method)) {
+                    streamService.handleAckRequest(requestEvent);
+                } else if (Request.BYE.equals(method)) {
+                    streamService.handleByeRequest(requestEvent);
                 } else {
                     log.warn("Unsupported request method: {}", method);
                 }
