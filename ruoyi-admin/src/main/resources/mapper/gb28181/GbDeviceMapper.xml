@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.oldwei.isup.mapper.GbDeviceMapper">
+
+    <resultMap type="com.oldwei.isup.model.GbDevice" id="GbDeviceResult">
+        <result property="id" column="id" />
+        <result property="deviceId" column="device_id" />
+        <result property="name" column="name" />
+        <result property="manufacturer" column="manufacturer" />
+        <result property="model" column="model" />
+        <result property="firmware" column="firmware" />
+        <result property="transport" column="transport" />
+        <result property="streamMode" column="stream_mode" />
+        <result property="onLine" column="on_line" />
+        <result property="registerTime" column="register_time" />
+        <result property="keepaliveTime" column="keepalive_time" />
+        <result property="ip" column="ip" />
+        <result property="createTime" column="create_time" />
+        <result property="updateTime" column="update_time" />
+        <result property="port" column="port" />
+        <result property="expires" column="expires" />
+        <result property="subscribeCycleForCatalog" column="subscribe_cycle_for_catalog" />
+        <result property="subscribeCycleForMobilePosition" column="subscribe_cycle_for_mobile_position" />
+        <result property="mobilePositionSubmissionInterval" column="mobile_position_submission_interval" />
+        <result property="subscribeCycleForAlarm" column="subscribe_cycle_for_alarm" />
+        <result property="hostAddress" column="host_address" />
+        <result property="charset" column="charset" />
+        <result property="ssrcCheck" column="ssrc_check" />
+        <result property="geoCoordSys" column="geo_coord_sys" />
+        <result property="mediaServerId" column="media_server_id" />
+        <result property="customName" column="custom_name" />
+        <result property="sdpIp" column="sdp_ip" />
+        <result property="localIp" column="local_ip" />
+        <result property="password" column="password" />
+        <result property="asMessageChannel" column="as_message_channel" />
+        <result property="heartBeatInterval" column="heart_beat_interval" />
+        <result property="heartBeatCount" column="heart_beat_count" />
+        <result property="positionCapability" column="position_capability" />
+        <result property="broadcastPushAfterAck" column="broadcast_push_after_ack" />
+        <result property="serverId" column="server_id" />
+    </resultMap>
+
+    <sql id="selectGbDeviceVo">
+        select id, device_id, name, manufacturer, model, firmware, transport, stream_mode, on_line, 
+               register_time, keepalive_time, ip, create_time, update_time, port, expires, 
+               subscribe_cycle_for_catalog, subscribe_cycle_for_mobile_position, mobile_position_submission_interval, 
+               subscribe_cycle_for_alarm, host_address, charset, ssrc_check, geo_coord_sys, media_server_id, 
+               custom_name, sdp_ip, local_ip, password, as_message_channel, heart_beat_interval, 
+               heart_beat_count, position_capability, broadcast_push_after_ack, server_id
+        from gb_device
+    </sql>
+
+    <select id="selectByDeviceId" parameterType="String" resultMap="GbDeviceResult">
+        <include refid="selectGbDeviceVo"/>
+        where device_id = #{deviceId}
+    </select>
+
+    <select id="selectList" parameterType="com.oldwei.isup.model.GbDevice" resultMap="GbDeviceResult">
+        <include refid="selectGbDeviceVo"/>
+        <where>
+            <if test="deviceId != null and deviceId != ''"> and device_id = #{deviceId}</if>
+            <if test="name != null and name != ''"> and name like concat('%', #{name}, '%')</if>
+            <if test="onLine != null"> and on_line = #{onLine}</if>
+        </where>
+    </select>
+
+    <insert id="insert" parameterType="com.oldwei.isup.model.GbDevice" useGeneratedKeys="true" keyProperty="id">
+        insert into gb_device (
+            device_id, name, manufacturer, model, firmware, transport, stream_mode, on_line, 
+            register_time, keepalive_time, ip, create_time, update_time, port, expires, 
+            subscribe_cycle_for_catalog, subscribe_cycle_for_mobile_position, mobile_position_submission_interval, 
+            subscribe_cycle_for_alarm, host_address, charset, ssrc_check, geo_coord_sys, media_server_id, 
+            custom_name, sdp_ip, local_ip, password, as_message_channel, heart_beat_interval, 
+            heart_beat_count, position_capability, broadcast_push_after_ack, server_id
+        ) values (
+            #{deviceId}, #{name}, #{manufacturer}, #{model}, #{firmware}, #{transport}, #{streamMode}, #{onLine}, 
+            #{registerTime}, #{keepaliveTime}, #{ip}, #{createTime}, #{updateTime}, #{port}, #{expires}, 
+            #{subscribeCycleForCatalog}, #{subscribeCycleForMobilePosition}, #{mobilePositionSubmissionInterval}, 
+            #{subscribeCycleForAlarm}, #{hostAddress}, #{charset}, #{ssrcCheck}, #{geoCoordSys}, #{mediaServerId}, 
+            #{customName}, #{sdpIp}, #{localIp}, #{password}, #{asMessageChannel}, #{heartBeatInterval}, 
+            #{heartBeatCount}, #{positionCapability}, #{broadcastPushAfterAck}, #{serverId}
+        )
+        ON DUPLICATE KEY UPDATE
+            name = values(name),
+            manufacturer = values(manufacturer),
+            model = values(model),
+            firmware = values(firmware),
+            transport = values(transport),
+            stream_mode = values(stream_mode),
+            on_line = values(on_line),
+            register_time = values(register_time),
+            keepalive_time = values(keepalive_time),
+            ip = values(ip),
+            update_time = values(update_time),
+            port = values(port),
+            expires = values(expires),
+            subscribe_cycle_for_catalog = values(subscribe_cycle_for_catalog),
+            subscribe_cycle_for_mobile_position = values(subscribe_cycle_for_mobile_position),
+            mobile_position_submission_interval = values(mobile_position_submission_interval),
+            subscribe_cycle_for_alarm = values(subscribe_cycle_for_alarm),
+            host_address = values(host_address),
+            charset = values(charset),
+            ssrc_check = values(ssrc_check),
+            geo_coord_sys = values(geo_coord_sys),
+            media_server_id = values(media_server_id),
+            custom_name = values(custom_name),
+            sdp_ip = values(sdp_ip),
+            local_ip = values(local_ip),
+            password = values(password),
+            as_message_channel = values(as_message_channel),
+            heart_beat_interval = values(heart_beat_interval),
+            heart_beat_count = values(heart_beat_count),
+            position_capability = values(position_capability),
+            broadcast_push_after_ack = values(broadcast_push_after_ack),
+            server_id = values(server_id)
+    </insert>
+
+    <update id="update" parameterType="com.oldwei.isup.model.GbDevice">
+        update gb_device
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="name != null">name = #{name},</if>
+            <if test="manufacturer != null">manufacturer = #{manufacturer},</if>
+            <if test="model != null">model = #{model},</if>
+            <if test="firmware != null">firmware = #{firmware},</if>
+            <if test="transport != null">transport = #{transport},</if>
+            <if test="streamMode != null">stream_mode = #{streamMode},</if>
+            <if test="onLine != null">on_line = #{onLine},</if>
+            <if test="registerTime != null">register_time = #{registerTime},</if>
+            <if test="keepaliveTime != null">keepalive_time = #{keepaliveTime},</if>
+            <if test="ip != null">ip = #{ip},</if>
+            <if test="createTime != null">create_time = #{createTime},</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+            <if test="port != null">port = #{port},</if>
+            <if test="expires != null">expires = #{expires},</if>
+            <if test="subscribeCycleForCatalog != null">subscribe_cycle_for_catalog = #{subscribeCycleForCatalog},</if>
+            <if test="subscribeCycleForMobilePosition != null">subscribe_cycle_for_mobile_position = #{subscribeCycleForMobilePosition},</if>
+            <if test="mobilePositionSubmissionInterval != null">mobile_position_submission_interval = #{mobilePositionSubmissionInterval},</if>
+            <if test="subscribeCycleForAlarm != null">subscribe_cycle_for_alarm = #{subscribeCycleForAlarm},</if>
+            <if test="hostAddress != null">host_address = #{hostAddress},</if>
+            <if test="charset != null">charset = #{charset},</if>
+            <if test="ssrcCheck != null">ssrc_check = #{ssrcCheck},</if>
+            <if test="geoCoordSys != null">geo_coord_sys = #{geoCoordSys},</if>
+            <if test="mediaServerId != null">media_server_id = #{mediaServerId},</if>
+            <if test="customName != null">custom_name = #{customName},</if>
+            <if test="sdpIp != null">sdp_ip = #{sdpIp},</if>
+            <if test="localIp != null">local_ip = #{localIp},</if>
+            <if test="password != null">password = #{password},</if>
+            <if test="asMessageChannel != null">as_message_channel = #{asMessageChannel},</if>
+            <if test="heartBeatInterval != null">heart_beat_interval = #{heartBeatInterval},</if>
+            <if test="heartBeatCount != null">heart_beat_count = #{heartBeatCount},</if>
+            <if test="positionCapability != null">position_capability = #{positionCapability},</if>
+            <if test="broadcastPushAfterAck != null">broadcast_push_after_ack = #{broadcastPushAfterAck},</if>
+            <if test="serverId != null">server_id = #{serverId},</if>
+        </trim>
+        where device_id = #{deviceId}
+    </update>
+
+    <delete id="deleteByDeviceId" parameterType="String">
+        delete from gb_device where device_id = #{deviceId}
+    </delete>
+
+    <update id="updateOnlineStatus">
+        update gb_device set on_line = #{onLine} where device_id = #{deviceId}
+    </update>
+
+    <update id="updateKeepalive">
+        update gb_device
+        <set>
+            keepalive_time = #{keepaliveTime},
+            on_line = 1,
+            <if test="ip != null and ip != ''">ip = #{ip},</if>
+            <if test="port != null and port > 0">port = #{port},</if>
+            <if test="hostAddress != null and hostAddress != ''">host_address = #{hostAddress},</if>
+            update_time = #{keepaliveTime}
+        </set>
+        where device_id = #{deviceId}
+    </update>
+
+</mapper>

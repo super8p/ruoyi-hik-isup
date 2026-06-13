@@ -1,6 +1,7 @@
 package com.oldwei.isup.controller;
 
 import com.oldwei.isup.config.HikStreamProperties;
+import com.oldwei.isup.config.HikIsupProperties;
 import com.oldwei.isup.model.Device;
 import com.oldwei.isup.model.R;
 import com.oldwei.isup.model.vo.PlayURL;
@@ -30,6 +31,7 @@ public class StreamController {
     private final IMediaStreamService mediaStreamService;
     private final DeviceCacheService deviceCacheService;
     private final HikStreamProperties hikStreamProperties;
+    private final HikIsupProperties hikIsupProperties;
     private final ZLMApi zlmApi;
     private final java.util.Set<Object> callbackKeepAlive = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
@@ -179,10 +181,10 @@ public class StreamController {
     private String buildWebrtcStreamUrl(String prefix, String streamKey) {
         Boolean isSSL = hikStreamProperties.getIsSSL();
         if (isSSL != null && isSSL) {
-            return "https://" + hikStreamProperties.getDomain() + "/index/api/webrtc?app=" + prefix + "&stream=" + streamKey + "&type=play&secret=hik12345";
+            return "https://" + hikStreamProperties.getDomain() + "/index/api/webrtc?app=" + prefix + "&stream=" + streamKey + "&type=play";
         }
         return "http://" + hikStreamProperties.getHttp().getIp() + ":"
-                + hikStreamProperties.getHttp().getPort() + "/index/api/webrtc?app=" + prefix + "&stream=" + streamKey + "&type=play&secret=hik12345";
+                + hikStreamProperties.getHttp().getPort() + "/index/api/webrtc?app=" + prefix + "&stream=" + streamKey + "&type=play";
     }
 
     /**
@@ -256,30 +258,54 @@ public class StreamController {
             String rtcUrl = "rtc://__defaultVhost__/" + app + "/" + stream + "?app=" + app + "&stream=" + stream + "&type=" + type;
             log.info("webrtcSdp JNA calling, app={}, stream={}, type={}, rtcUrl={}", app, stream, type, rtcUrl);
 
-            CompletableFuture<String> future = new CompletableFuture<>();
-            IMKWebRtcGetAnwerSdpCallBack callback = new IMKWebRtcGetAnwerSdpCallBack() {
-                @Override
-                public void invoke(com.sun.jna.Pointer user_data, String answer_sdp, String err) {
-                    try {
-                        if (err != null && !err.isEmpty()) {
-                            log.error("JNA WebRTC SDP callback error: {}", err);
-                            future.completeExceptionally(new RuntimeException(err));
-                        } else {
-                            log.info("JNA WebRTC SDP callback succeed, answerSdp length: {}", answer_sdp != null ? answer_sdp.length() : 0);
-                            future.complete(answer_sdp);
+            String answerSdp = null;
+            int maxRetries = 15;
+            int retryCount = 0;
+            while (retryCount < maxRetries) {
+                CompletableFuture<String> future = new CompletableFuture<>();
+                IMKWebRtcGetAnwerSdpCallBack callback = new IMKWebRtcGetAnwerSdpCallBack() {
+                    @Override
+                    public void invoke(com.sun.jna.Pointer user_data, String answer_sdp, String err) {
+                        try {
+                            if (err != null && !err.isEmpty()) {
+                                future.completeExceptionally(new RuntimeException(err));
+                            } else {
+                                log.info("JNA WebRTC SDP callback succeed, answerSdp length: {}", answer_sdp != null ? answer_sdp.length() : 0);
+                                future.complete(answer_sdp);
+                            }
+                        } catch (Exception e) {
+                            future.completeExceptionally(e);
+                        } finally {
+                            callbackKeepAlive.remove(this);
                         }
-                    } catch (Exception e) {
-                        future.completeExceptionally(e);
-                    } finally {
-                        callbackKeepAlive.remove(this);
                     }
+                };
+
+                callbackKeepAlive.add(callback);
+                zlmApi.mk_webrtc_get_answer_sdp(null, callback, type, sdp, rtcUrl);
+
+                try {
+                    answerSdp = future.get(800, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    break;
+                } catch (java.util.concurrent.ExecutionException e) {
+                    Throwable cause = e.getCause();
+                    if (cause != null && "stream not found".equals(cause.getMessage())) {
+                        retryCount++;
+                        log.info("webrtcSdp: stream not found in ZLM yet, retrying ({}/{}) for stream {}", retryCount, maxRetries, stream);
+                        Thread.sleep(500);
+                    } else {
+                        throw e;
+                    }
+                } catch (java.util.concurrent.TimeoutException e) {
+                    retryCount++;
+                    log.info("webrtcSdp: JNA callback timeout, retrying ({}/{}) for stream {}", retryCount, maxRetries, stream);
+                    Thread.sleep(500);
                 }
-            };
+            }
 
-            callbackKeepAlive.add(callback);
-            zlmApi.mk_webrtc_get_answer_sdp(null, callback, type, sdp, rtcUrl);
-
-            String answerSdp = future.get(10, java.util.concurrent.TimeUnit.SECONDS);
+            if (answerSdp == null) {
+                return R.fail("代理 WebRTC SDP 请求失败: 流未就绪 (stream not found)");
+            }
             return R.ok("操作成功", answerSdp);
         } catch (Exception e) {
             log.error("webrtc sdp proxy failed, targetUrl={}", targetUrl, e);

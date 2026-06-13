@@ -197,3 +197,11 @@ hik:
       listenPort: 6120
     isupKey: hik12345
     eventInfoPrintType: file
+
+sip:
+  ip: 192.168.1.179          # SIP服务器监听IP
+  port: 8116                 # SIP服务器监听端口
+  id: 61000000002000000001   # SIP服务器国标ID
+  domain: 6100000000         # SIP服务器国标域
+  password: 61234567         # 设备注册鉴权密码
+  timeout: 60                # 心跳超时时间(秒)

@@ -1,0 +1,291 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.oldwei.isup.mapper.GbDeviceChannelMapper">
+
+    <resultMap type="com.oldwei.isup.model.GbDeviceChannel" id="GbDeviceChannelResult">
+        <result property="id" column="id" />
+        <result property="deviceId" column="device_id" />
+        <result property="name" column="name" />
+        <result property="manufacturer" column="manufacturer" />
+        <result property="model" column="model" />
+        <result property="owner" column="owner" />
+        <result property="civilCode" column="civil_code" />
+        <result property="block" column="block" />
+        <result property="address" column="address" />
+        <result property="parental" column="parental" />
+        <result property="parentId" column="parent_id" />
+        <result property="safetyWay" column="safety_way" />
+        <result property="registerWay" column="register_way" />
+        <result property="certNum" column="cert_num" />
+        <result property="certifiable" column="certifiable" />
+        <result property="errCode" column="err_code" />
+        <result property="endTime" column="end_time" />
+        <result property="secrecy" column="secrecy" />
+        <result property="ipAddress" column="ip_address" />
+        <result property="port" column="port" />
+        <result property="password" column="password" />
+        <result property="status" column="status" />
+        <result property="longitude" column="longitude" />
+        <result property="latitude" column="latitude" />
+        <result property="ptzType" column="ptz_type" />
+        <result property="positionType" column="position_type" />
+        <result property="roomType" column="room_type" />
+        <result property="useType" column="use_type" />
+        <result property="supplyLightType" column="supply_light_type" />
+        <result property="directionType" column="direction_type" />
+        <result property="resolution" column="resolution" />
+        <result property="businessGroupId" column="business_group_id" />
+        <result property="downloadSpeed" column="download_speed" />
+        <result property="svcSpaceSupportMod" column="svc_space_support_mod" />
+        <result property="svcTimeSupportMode" column="svc_time_support_mode" />
+        <result property="createTime" column="create_time" />
+        <result property="updateTime" column="update_time" />
+        <result property="subCount" column="sub_count" />
+        <result property="streamId" column="stream_id" />
+        <result property="hasAudio" column="has_audio" />
+        <result property="gpsTime" column="gps_time" />
+        <result property="streamIdentification" column="stream_identification" />
+        <result property="channelType" column="channel_type" />
+        <result property="gbDeviceId" column="gb_device_id" />
+        <result property="gbName" column="gb_name" />
+        <result property="gbManufacturer" column="gb_manufacturer" />
+        <result property="gbModel" column="gb_model" />
+        <result property="gbOwner" column="gb_owner" />
+        <result property="gbCivilCode" column="gb_civil_code" />
+        <result property="gbBlock" column="gb_block" />
+        <result property="gbAddress" column="gb_address" />
+        <result property="gbParental" column="gb_parental" />
+        <result property="gbParentId" column="gb_parent_id" />
+        <result property="gbSafetyWay" column="gb_safety_way" />
+        <result property="gbRegisterWay" column="gb_register_way" />
+        <result property="gbCertNum" column="gb_cert_num" />
+        <result property="gbCertifiable" column="gb_certifiable" />
+        <result property="gbErrCode" column="gb_err_code" />
+        <result property="gbEndTime" column="gb_end_time" />
+        <result property="gbSecrecy" column="gb_secrecy" />
+        <result property="gbIpAddress" column="gb_ip_address" />
+        <result property="gbPort" column="gb_port" />
+        <result property="gbPassword" column="gb_password" />
+        <result property="gbStatus" column="gb_status" />
+        <result property="gbLongitude" column="gb_longitude" />
+        <result property="gbLatitude" column="gb_latitude" />
+        <result property="gbBusinessGroupId" column="gb_business_group_id" />
+        <result property="gbPtzType" column="gb_ptz_type" />
+        <result property="gbPositionType" column="gb_position_type" />
+        <result property="gbRoomType" column="gb_room_type" />
+        <result property="gbUseType" column="gb_use_type" />
+        <result property="gbSupplyLightType" column="gb_supply_light_type" />
+        <result property="gbDirectionType" column="gb_direction_type" />
+        <result property="gbResolution" column="gb_resolution" />
+        <result property="gbDownloadSpeed" column="gb_download_speed" />
+        <result property="gbSvcSpaceSupportMod" column="gb_svc_space_support_mod" />
+        <result property="gbSvcTimeSupportMode" column="gb_svc_time_support_mode" />
+        <result property="recordPlanId" column="record_plan_id" />
+        <result property="dataType" column="data_type" />
+        <result property="dataDeviceId" column="data_device_id" />
+        <result property="gpsSpeed" column="gps_speed" />
+        <result property="gpsAltitude" column="gps_altitude" />
+        <result property="gpsDirection" column="gps_direction" />
+    </resultMap>
+
+    <sql id="selectGbDeviceChannelVo">
+        select id, device_id, name, manufacturer, model, owner, civil_code, block, address, parental, 
+               parent_id, safety_way, register_way, cert_num, certifiable, err_code, end_time, secrecy, 
+               ip_address, port, password, status, longitude, latitude, ptz_type, position_type, room_type, 
+               use_type, supply_light_type, direction_type, resolution, business_group_id, download_speed, 
+               svc_space_support_mod, svc_time_support_mode, create_time, update_time, sub_count, stream_id, 
+               has_audio, gps_time, stream_identification, channel_type, gb_device_id, gb_name, gb_manufacturer, 
+               gb_model, gb_owner, gb_civil_code, gb_block, gb_address, gb_parental, gb_parent_id, gb_safety_way, 
+               gb_register_way, gb_cert_num, gb_certifiable, gb_err_code, gb_end_time, gb_secrecy, gb_ip_address, 
+               gb_port, gb_password, gb_status, gb_longitude, gb_latitude, gb_business_group_id, gb_ptz_type, 
+               gb_position_type, gb_room_type, gb_use_type, gb_supply_light_type, gb_direction_type, 
+               gb_resolution, gb_download_speed, gb_svc_space_support_mod, gb_svc_time_support_mode, 
+               record_plan_id, data_type, data_device_id, gps_speed, gps_altitude, gps_direction
+        from gb_device_channel
+    </sql>
+
+    <select id="selectByChannelId" parameterType="String" resultMap="GbDeviceChannelResult">
+        <include refid="selectGbDeviceChannelVo"/>
+        where gb_device_id = #{gbDeviceId}
+    </select>
+
+    <select id="selectListByDeviceId" parameterType="String" resultMap="GbDeviceChannelResult">
+        <include refid="selectGbDeviceChannelVo"/>
+        where device_id = #{deviceId}
+    </select>
+
+    <insert id="insert" parameterType="com.oldwei.isup.model.GbDeviceChannel" useGeneratedKeys="true" keyProperty="id">
+        insert into gb_device_channel (
+            device_id, name, manufacturer, model, owner, civil_code, block, address, parental, 
+            parent_id, safety_way, register_way, cert_num, certifiable, err_code, end_time, secrecy, 
+            ip_address, port, password, status, longitude, latitude, ptz_type, position_type, room_type, 
+            use_type, supply_light_type, direction_type, resolution, business_group_id, download_speed, 
+            svc_space_support_mod, svc_time_support_mode, create_time, update_time, sub_count, stream_id, 
+            has_audio, gps_time, stream_identification, channel_type, gb_device_id, gb_name, gb_manufacturer, 
+            gb_model, gb_owner, gb_civil_code, gb_block, gb_address, gb_parental, gb_parent_id, gb_safety_way, 
+            gb_register_way, gb_cert_num, gb_certifiable, gb_err_code, gb_end_time, gb_secrecy, gb_ip_address, 
+            gb_port, gb_password, gb_status, gb_longitude, gb_latitude, gb_business_group_id, gb_ptz_type, 
+            gb_position_type, gb_room_type, gb_use_type, gb_supply_light_type, gb_direction_type, 
+            gb_resolution, gb_download_speed, gb_svc_space_support_mod, gb_svc_time_support_mode, 
+            record_plan_id, data_type, data_device_id, gps_speed, gps_altitude, gps_direction
+        ) values (
+            #{deviceId}, #{name}, #{manufacturer}, #{model}, #{owner}, #{civilCode}, #{block}, #{address}, #{parental}, 
+            #{parentId}, #{safetyWay}, #{registerWay}, #{certNum}, #{certifiable}, #{errCode}, #{endTime}, #{secrecy}, 
+            #{ipAddress}, #{port}, #{password}, #{status}, #{longitude}, #{latitude}, #{ptzType}, #{positionType}, #{roomType}, 
+            #{useType}, #{supplyLightType}, #{directionType}, #{resolution}, #{businessGroupId}, #{downloadSpeed}, 
+            #{svcSpaceSupportMod}, #{svcTimeSupportMode}, #{createTime}, #{updateTime}, #{subCount}, #{streamId}, 
+            #{hasAudio}, #{gpsTime}, #{streamIdentification}, #{channelType}, #{gbDeviceId}, #{gbName}, #{gbManufacturer}, 
+            #{gbModel}, #{gbOwner}, #{gbCivilCode}, #{gbBlock}, #{gbAddress}, #{gbParental}, #{gbParentId}, #{gbSafetyWay}, 
+            #{gbRegisterWay}, #{gbCertNum}, #{gbCertifiable}, #{gbErrCode}, #{gbEndTime}, #{gbSecrecy}, #{gbIpAddress}, 
+            #{gbPort}, #{gbPassword}, #{gbStatus}, #{gbLongitude}, #{gbLatitude}, #{gbBusinessGroupId}, #{gbPtzType}, 
+            #{gbPositionType}, #{gbRoomType}, #{gbUseType}, #{gbSupplyLightType}, #{gbDirectionType}, 
+            #{gbResolution}, #{gbDownloadSpeed}, #{gbSvcSpaceSupportMod}, #{gbSvcTimeSupportMode}, 
+            #{recordPlanId}, #{dataType}, #{dataDeviceId}, #{gpsSpeed}, #{gpsAltitude}, #{gpsDirection}
+        )
+        ON DUPLICATE KEY UPDATE
+            device_id = values(device_id),
+            name = values(name),
+            manufacturer = values(manufacturer),
+            model = values(model),
+            owner = values(owner),
+            civil_code = values(civil_code),
+            block = values(block),
+            address = values(address),
+            parental = values(parental),
+            parent_id = values(parent_id),
+            safety_way = values(safety_way),
+            register_way = values(register_way),
+            cert_num = values(cert_num),
+            certifiable = values(certifiable),
+            err_code = values(err_code),
+            end_time = values(end_time),
+            secrecy = values(secrecy),
+            ip_address = values(ip_address),
+            port = values(port),
+            password = values(password),
+            status = values(status),
+            longitude = values(longitude),
+            latitude = values(latitude),
+            ptz_type = values(ptz_type),
+            position_type = values(position_type),
+            room_type = values(room_type),
+            use_type = values(use_type),
+            supply_light_type = values(supply_light_type),
+            direction_type = values(direction_type),
+            resolution = values(resolution),
+            business_group_id = values(business_group_id),
+            download_speed = values(download_speed),
+            svc_space_support_mod = values(svc_space_support_mod),
+            svc_time_support_mode = values(svc_time_support_mode),
+            update_time = values(update_time),
+            sub_count = values(sub_count),
+            has_audio = values(has_audio),
+            gps_time = values(gps_time),
+            stream_identification = values(stream_identification),
+            channel_type = values(channel_type),
+            data_type = values(data_type),
+            data_device_id = values(data_device_id),
+            gps_speed = values(gps_speed),
+            gps_altitude = values(gps_altitude),
+            gps_direction = values(gps_direction)
+    </insert>
+
+    <update id="update" parameterType="com.oldwei.isup.model.GbDeviceChannel">
+        update gb_device_channel
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="deviceId != null">device_id = #{deviceId},</if>
+            <if test="name != null">name = #{name},</if>
+            <if test="manufacturer != null">manufacturer = #{manufacturer},</if>
+            <if test="model != null">model = #{model},</if>
+            <if test="owner != null">owner = #{owner},</if>
+            <if test="civilCode != null">civil_code = #{civilCode},</if>
+            <if test="block != null">block = #{block},</if>
+            <if test="address != null">address = #{address},</if>
+            <if test="parental != null">parental = #{parental},</if>
+            <if test="parentId != null">parent_id = #{parentId},</if>
+            <if test="safetyWay != null">safety_way = #{safetyWay},</if>
+            <if test="registerWay != null">register_way = #{registerWay},</if>
+            <if test="certNum != null">cert_num = #{certNum},</if>
+            <if test="certifiable != null">certifiable = #{certifiable},</if>
+            <if test="errCode != null">err_code = #{errCode},</if>
+            <if test="endTime != null">end_time = #{endTime},</if>
+            <if test="secrecy != null">secrecy = #{secrecy},</if>
+            <if test="ipAddress != null">ip_address = #{ipAddress},</if>
+            <if test="port != null">port = #{port},</if>
+            <if test="password != null">password = #{password},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="longitude != null">longitude = #{longitude},</if>
+            <if test="latitude != null">latitude = #{latitude},</if>
+            <if test="ptzType != null">ptz_type = #{ptzType},</if>
+            <if test="positionType != null">position_type = #{positionType},</if>
+            <if test="roomType != null">room_type = #{roomType},</if>
+            <if test="useType != null">use_type = #{useType},</if>
+            <if test="supplyLightType != null">supply_light_type = #{supplyLightType},</if>
+            <if test="directionType != null">direction_type = #{directionType},</if>
+            <if test="resolution != null">resolution = #{resolution},</if>
+            <if test="businessGroupId != null">business_group_id = #{businessGroupId},</if>
+            <if test="downloadSpeed != null">download_speed = #{downloadSpeed},</if>
+            <if test="svcSpaceSupportMod != null">svc_space_support_mod = #{svcSpaceSupportMod},</if>
+            <if test="svcTimeSupportMode != null">svc_time_support_mode = #{svcTimeSupportMode},</if>
+            <if test="createTime != null">create_time = #{createTime},</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+            <if test="subCount != null">sub_count = #{subCount},</if>
+            <if test="streamId != null">stream_id = #{streamId},</if>
+            <if test="hasAudio != null">has_audio = #{hasAudio},</if>
+            <if test="gpsTime != null">gps_time = #{gpsTime},</if>
+            <if test="streamIdentification != null">stream_identification = #{streamIdentification},</if>
+            <if test="channelType != null">channel_type = #{channelType},</if>
+            <if test="gbName != null">gb_name = #{gbName},</if>
+            <if test="gbManufacturer != null">gb_manufacturer = #{gbManufacturer},</if>
+            <if test="gbModel != null">gb_model = #{gbModel},</if>
+            <if test="gbOwner != null">gb_owner = #{gbOwner},</if>
+            <if test="gbCivilCode != null">gb_civil_code = #{gbCivilCode},</if>
+            <if test="gbBlock != null">gb_block = #{gbBlock},</if>
+            <if test="gbAddress != null">gb_address = #{gbAddress},</if>
+            <if test="gbParental != null">gb_parental = #{gbParental},</if>
+            <if test="gbParentId != null">gb_parent_id = #{gbParentId},</if>
+            <if test="gbSafetyWay != null">gb_safety_way = #{gbSafetyWay},</if>
+            <if test="gbRegisterWay != null">gb_register_way = #{gbRegisterWay},</if>
+            <if test="gbCertNum != null">gb_cert_num = #{gbCertNum},</if>
+            <if test="gbCertifiable != null">gb_certifiable = #{gbCertifiable},</if>
+            <if test="gbErrCode != null">gb_err_code = #{gbErrCode},</if>
+            <if test="gbEndTime != null">gb_end_time = #{gbEndTime},</if>
+            <if test="gbSecrecy != null">gb_secrecy = #{gbSecrecy},</if>
+            <if test="gbIpAddress != null">gb_ip_address = #{gbIpAddress},</if>
+            <if test="gbPort != null">gb_port = #{gbPort},</if>
+            <if test="gbPassword != null">gb_password = #{gbPassword},</if>
+            <if test="gbStatus != null">gb_status = #{gbStatus},</if>
+            <if test="gbLongitude != null">gb_longitude = #{gbLongitude},</if>
+            <if test="gbLatitude != null">gb_latitude = #{gbLatitude},</if>
+            <if test="gbBusinessGroupId != null">gb_business_group_id = #{gbBusinessGroupId},</if>
+            <if test="gbPtzType != null">gb_ptz_type = #{gbPtzType},</if>
+            <if test="gbPositionType != null">gb_position_type = #{gbPositionType},</if>
+            <if test="gbRoomType != null">gb_room_type = #{gbRoomType},</if>
+            <if test="gbUseType != null">gb_use_type = #{gbUseType},</if>
+            <if test="gbSupplyLightType != null">gb_supply_light_type = #{gbSupplyLightType},</if>
+            <if test="gbDirectionType != null">gb_direction_type = #{gbDirectionType},</if>
+            <if test="gbResolution != null">gb_resolution = #{gbResolution},</if>
+            <if test="gbDownloadSpeed != null">gb_download_speed = #{gbDownloadSpeed},</if>
+            <if test="gbSvcSpaceSupportMod != null">gb_svc_space_support_mod = #{gbSvcSpaceSupportMod},</if>
+            <if test="gbSvcTimeSupportMode != null">gb_svc_time_support_mode = #{gbSvcTimeSupportMode},</if>
+            <if test="recordPlanId != null">record_plan_id = #{recordPlanId},</if>
+            <if test="dataType != null">data_type = #{dataType},</if>
+            <if test="dataDeviceId != null">data_device_id = #{dataDeviceId},</if>
+            <if test="gpsSpeed != null">gps_speed = #{gpsSpeed},</if>
+            <if test="gpsAltitude != null">gps_altitude = #{gpsAltitude},</if>
+            <if test="gpsDirection != null">gps_direction = #{gpsDirection},</if>
+        </trim>
+        where gb_device_id = #{gbDeviceId}
+    </update>
+
+    <delete id="deleteByDeviceId" parameterType="String">
+        delete from gb_device_channel where device_id = #{deviceId}
+    </delete>
+
+    <delete id="deleteByChannelId" parameterType="String">
+        delete from gb_device_channel where gb_device_id = #{gbDeviceId}
+    </delete>
+
+</mapper>

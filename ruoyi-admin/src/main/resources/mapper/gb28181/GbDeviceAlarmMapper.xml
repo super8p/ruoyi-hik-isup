@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.oldwei.isup.mapper.GbDeviceAlarmMapper">
+
+    <resultMap type="com.oldwei.isup.model.GbDeviceAlarm" id="GbDeviceAlarmResult">
+        <result property="id" column="id" />
+        <result property="deviceId" column="device_id" />
+        <result property="channelId" column="channel_id" />
+        <result property="alarmPriority" column="alarm_priority" />
+        <result property="alarmMethod" column="alarm_method" />
+        <result property="alarmTime" column="alarm_time" />
+        <result property="alarmDescription" column="alarm_description" />
+        <result property="longitude" column="longitude" />
+        <result property="latitude" column="latitude" />
+        <result property="alarmType" column="alarm_type" />
+        <result property="createTime" column="create_time" />
+    </resultMap>
+
+    <insert id="insert" parameterType="com.oldwei.isup.model.GbDeviceAlarm" useGeneratedKeys="true" keyProperty="id">
+        insert into gb_device_alarm (
+            device_id, channel_id, alarm_priority, alarm_method, alarm_time, 
+            alarm_description, longitude, latitude, alarm_type, create_time
+        ) values (
+            #{deviceId}, #{channelId}, #{alarmPriority}, #{alarmMethod}, #{alarmTime}, 
+            #{alarmDescription}, #{longitude}, #{latitude}, #{alarmType}, #{createTime}
+        )
+    </insert>
+
+    <select id="selectList" parameterType="com.oldwei.isup.model.GbDeviceAlarm" resultMap="GbDeviceAlarmResult">
+        select id, device_id, channel_id, alarm_priority, alarm_method, alarm_time, 
+               alarm_description, longitude, latitude, alarm_type, create_time
+        from gb_device_alarm
+        <where>
+            <if test="deviceId != null and deviceId != ''"> and device_id = #{deviceId}</if>
+            <if test="channelId != null and channelId != ''"> and channel_id = #{channelId}</if>
+            <if test="alarmType != null and alarmType != ''"> and alarm_type = #{alarmType}</if>
+        </where>
+        order by id desc
+    </select>
+
+</mapper>

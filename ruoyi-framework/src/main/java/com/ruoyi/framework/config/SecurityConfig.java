@@ -114,6 +114,7 @@ public class SecurityConfig {
                             .requestMatchers("/api/devices/*/playback").permitAll()
                             .requestMatchers("/api/devices/*/voice/**").permitAll()
                             .requestMatchers("/api/devices/*/webrtcSdp").permitAll()
+                            .requestMatchers("/api/gb28181/**").permitAll()
                             .requestMatchers("/pic").permitAll()
                             .anyRequest().authenticated();
                 })
@@ -138,6 +139,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/devices/*/playback")
                 .requestMatchers("/api/devices/*/voice/**")
                 .requestMatchers("/api/devices/*/webrtcSdp")
+                .requestMatchers("/api/gb28181/**")
                 .requestMatchers("/pic");
     }
 
