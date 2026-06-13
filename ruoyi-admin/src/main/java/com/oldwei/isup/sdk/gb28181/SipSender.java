@@ -25,37 +25,37 @@ public class SipSender {
 
     public void sendCatalogRequest(GbDevice device) {
         String sn = String.valueOf((int) ((Math.random() * 9 + 1) * 100000));
-        String xml = "<?xml version=\"1.0\" encoding=\"GB2312\"?>\n" +
-                "<Query>\n" +
-                "  <CmdType>Catalog</CmdType>\n" +
-                "  <SN>" + sn + "</SN>\n" +
-                "  <DeviceID>" + device.getDeviceId() + "</DeviceID>\n" +
-                "</Query>\n";
+        String xml = "<?xml version=\"1.0\" encoding=\"GB2312\"?>\r\n" +
+                "<Query>\r\n" +
+                "  <CmdType>Catalog</CmdType>\r\n" +
+                "  <SN>" + sn + "</SN>\r\n" +
+                "  <DeviceID>" + device.getDeviceId() + "</DeviceID>\r\n" +
+                "</Query>\r\n";
         sendXmlMessage(device, xml);
         log.info("Sent Catalog query to device: {}", device.getDeviceId());
     }
 
     public void sendDeviceInfoRequest(GbDevice device) {
         String sn = String.valueOf((int) ((Math.random() * 9 + 1) * 100000));
-        String xml = "<?xml version=\"1.0\" encoding=\"GB2312\"?>\n" +
-                "<Query>\n" +
-                "  <CmdType>DeviceInfo</CmdType>\n" +
-                "  <SN>" + sn + "</SN>\n" +
-                "  <DeviceID>" + device.getDeviceId() + "</DeviceID>\n" +
-                "</Query>\n";
+        String xml = "<?xml version=\"1.0\" encoding=\"GB2312\"?>\r\n" +
+                "<Query>\r\n" +
+                "  <CmdType>DeviceInfo</CmdType>\r\n" +
+                "  <SN>" + sn + "</SN>\r\n" +
+                "  <DeviceID>" + device.getDeviceId() + "</DeviceID>\r\n" +
+                "</Query>\r\n";
         sendXmlMessage(device, xml);
         log.info("Sent DeviceInfo query to device: {}", device.getDeviceId());
     }
 
     public void sendBroadcastNotify(GbDevice device, String channelId) {
         String sn = String.valueOf((int) ((Math.random() * 9 + 1) * 100000));
-        String xml = "<?xml version=\"1.0\" encoding=\"GB2312\"?>\n" +
-                "<Notify>\n" +
-                "  <CmdType>Broadcast</CmdType>\n" +
-                "  <SN>" + sn + "</SN>\n" +
-                "  <SourceID>" + sipConfig.getId() + "</SourceID>\n" +
-                "  <TargetID>" + channelId + "</TargetID>\n" +
-                "</Notify>\n";
+        String xml = "<?xml version=\"1.0\" encoding=\"GB2312\"?>\r\n" +
+                "<Notify>\r\n" +
+                "  <CmdType>Broadcast</CmdType>\r\n" +
+                "  <SN>" + sn + "</SN>\r\n" +
+                "  <SourceID>" + sipConfig.getId() + "</SourceID>\r\n" +
+                "  <TargetID>" + channelId + "</TargetID>\r\n" +
+                "</Notify>\r\n";
         sendXmlMessage(device, xml);
         log.info("Sent Broadcast Notify to device: {}, channel: {}", device.getDeviceId(), channelId);
     }
@@ -72,7 +72,7 @@ public class SipSender {
             CallIdHeader callIdHeader = provider.getNewCallId();
             CSeqHeader cSeqHeader = headerFactory.createCSeqHeader(1L, Request.MESSAGE);
 
-            SipURI fromUri = addressFactory.createSipURI(sipConfig.getId(), sipConfig.getIp() + ":" + sipConfig.getPort());
+            SipURI fromUri = addressFactory.createSipURI(sipConfig.getId(), sipConfig.getDomain());
             Address fromAddress = addressFactory.createAddress(fromUri);
             FromHeader fromHeader = headerFactory.createFromHeader(fromAddress, UUID.randomUUID().toString().replace("-", ""));
 
@@ -83,7 +83,9 @@ public class SipSender {
             MaxForwardsHeader maxForwards = headerFactory.createMaxForwardsHeader(70);
 
             ArrayList<ViaHeader> viaHeaders = new ArrayList<>();
-            ViaHeader viaHeader = headerFactory.createViaHeader(sipConfig.getIp(), sipConfig.getPort(), device.getTransport(), null);
+            String branch = "z9hG4bK" + UUID.randomUUID().toString().replace("-", "").substring(0, 10);
+            ViaHeader viaHeader = headerFactory.createViaHeader(sipConfig.getIp(), sipConfig.getPort(), device.getTransport(), branch);
+            viaHeader.setRPort();
             viaHeaders.add(viaHeader);
 
             Request request = messageFactory.createRequest(requestUri, Request.MESSAGE, callIdHeader, cSeqHeader, 

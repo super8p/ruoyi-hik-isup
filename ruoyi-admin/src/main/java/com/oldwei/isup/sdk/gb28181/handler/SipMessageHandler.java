@@ -53,6 +53,10 @@ public class SipMessageHandler {
     @org.springframework.beans.factory.annotation.Autowired
     private com.oldwei.isup.sdk.service.impl.FRegisterCallBack fRegisterCallBack;
 
+    @org.springframework.context.annotation.Lazy
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.oldwei.isup.service.impl.GB28181StreamServiceImpl streamService;
+
     /**
      * 心跳批量入库队列（对标 wvp KeepaliveNotifyMessageHandler.taskQueue）
      * 收到心跳后先放队列，每10秒批量写库，避免高频写数据库
@@ -92,10 +96,30 @@ public class SipMessageHandler {
             String cmdType = root.elementTextTrim("CmdType");
             String deviceId = root.elementTextTrim("DeviceID");
 
-            // 检查设备是否存在于数据库中
-            GbDevice device = deviceMapper.selectByDeviceId(deviceId);
+            // 从 SIP From 头中解析真正的 DeviceID / ChannelID
+            javax.sip.header.FromHeader fromHeader = (javax.sip.header.FromHeader) request.getHeader(javax.sip.header.FromHeader.NAME);
+            String sipFromUserId = ((javax.sip.address.SipURI) fromHeader.getAddress().getURI()).getUser();
+
+            // 健壮的设备查询逻辑
+            GbDevice device = deviceMapper.selectByDeviceId(sipFromUserId);
             if (device == null) {
-                log.warn("[SIP消息] 收到未知设备 ({}) 的 {} 消息，回复 403 Forbidden 促使其重新注册", deviceId, cmdType);
+                GbDeviceChannel channel = channelMapper.selectByChannelId(sipFromUserId);
+                if (channel != null) {
+                    device = deviceMapper.selectByDeviceId(channel.getDeviceId());
+                }
+            }
+            if (device == null && deviceId != null) {
+                device = deviceMapper.selectByDeviceId(deviceId);
+                if (device == null) {
+                    GbDeviceChannel channel = channelMapper.selectByChannelId(deviceId);
+                    if (channel != null) {
+                        device = deviceMapper.selectByDeviceId(channel.getDeviceId());
+                    }
+                }
+            }
+
+            if (device == null) {
+                log.warn("[SIP消息] 收到未知设备 (FromHeader={}, XML={}) 的 {} 消息，回复 403 Forbidden 促使其重新注册", sipFromUserId, deviceId, cmdType);
                 Response response = messageFactory.createResponse(Response.FORBIDDEN, request);
                 provider.sendResponse(response);
                 return;
@@ -105,24 +129,29 @@ public class SipMessageHandler {
             Response response = messageFactory.createResponse(Response.OK, request);
             provider.sendResponse(response);
 
+            String resolvedDeviceId = device.getDeviceId();
+
             if ("KeepAlive".equalsIgnoreCase(cmdType)) {
                 // 心跳单独打印详细信息（来源 IP:Port + 原始 XML）
                 ViaHeader via = (ViaHeader) request.getHeader(ViaHeader.NAME);
                 String srcIp   = (via != null && via.getReceived() != null) ? via.getReceived() : (via != null ? via.getHost() : "unknown");
                 int    srcPort = (via != null && via.getRPort() > 0) ? via.getRPort() : (via != null ? via.getPort() : 0);
-                log.info("[心跳收包] 来源={}:{}, DeviceID={}, 原始XML:\n{}", srcIp, srcPort, deviceId, xml);
-                handleKeepAlive(deviceId, root, requestEvent);
+                log.info("[心跳收包] 来源={}:{}, DeviceID={}, 原始XML:\n{}", srcIp, srcPort, resolvedDeviceId, xml);
+                handleKeepAlive(resolvedDeviceId, root, requestEvent);
             } else if ("Catalog".equalsIgnoreCase(cmdType)) {
-                log.debug("[Catalog] DeviceID={}, 原始XML:\n{}", deviceId, xml);
-                handleCatalog(deviceId, root);
+                log.debug("[Catalog] DeviceID={}, 原始XML:\n{}", resolvedDeviceId, xml);
+                handleCatalog(resolvedDeviceId, root);
             } else if ("DeviceInfo".equalsIgnoreCase(cmdType)) {
-                log.debug("[DeviceInfo] DeviceID={}, 原始XML:\n{}", deviceId, xml);
-                handleDeviceInfo(deviceId, root);
+                log.debug("[DeviceInfo] DeviceID={}, 原始XML:\n{}", resolvedDeviceId, xml);
+                handleDeviceInfo(resolvedDeviceId, root);
             } else if ("Alarm".equalsIgnoreCase(cmdType)) {
-                log.info("[Alarm] DeviceID={}, 原始XML:\n{}", deviceId, xml);
-                handleAlarm(deviceId, root);
+                log.info("[Alarm] DeviceID={}, 原始XML:\n{}", resolvedDeviceId, xml);
+                handleAlarm(resolvedDeviceId, root);
+            } else if ("Broadcast".equalsIgnoreCase(cmdType)) {
+                log.info("[Broadcast] DeviceID={}, 原始XML:\n{}", resolvedDeviceId, xml);
+                handleBroadcast(resolvedDeviceId, root);
             } else {
-                log.warn("[未知CmdType={}] DeviceID={}, 原始XML:\n{}", cmdType, deviceId, xml);
+                log.warn("[未知CmdType={}] DeviceID={}, 原始XML:\n{}", cmdType, resolvedDeviceId, xml);
             }
 
         } catch (Exception e) {
@@ -606,6 +635,21 @@ public class SipMessageHandler {
             alarmNotifyService.pushAlarm(alarm);
         } catch (Exception e) {
             log.error("Failed to push GB28181 alarm to Xiaoan platform", e);
+        }
+    }
+
+    private void handleBroadcast(String deviceId, Element root) {
+        String channelId = root.elementTextTrim("DeviceID");
+        String result = root.elementTextTrim("Result");
+        Element infoEl = root.element("Info");
+        String reason = infoEl != null ? infoEl.elementTextTrim("Reason") : null;
+        log.info("[语音广播回复] deviceId={}, channelId={}, result={}, reason={}", deviceId, channelId, result, reason);
+        if (!"OK".equalsIgnoreCase(result)) {
+            try {
+                streamService.stopTalk(deviceId, channelId);
+            } catch (Exception e) {
+                log.error("Failed to stop talk for device {} on broadcast failure", deviceId, e);
+            }
         }
     }
 }

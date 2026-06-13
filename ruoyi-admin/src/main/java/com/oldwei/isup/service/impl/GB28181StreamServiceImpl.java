@@ -56,6 +56,9 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
     // 会话管理器映射
     private final Map<String, GB28181Session> sessions = new ConcurrentHashMap<>();
 
+    // 强引用回调映射，防止 JNA 异步回调在垃圾回收时被回收
+    private final Map<String, com.aizuda.zlm4j.callback.IMKSourceSendRtpResultCallBack> activeRtpCallbacks = new ConcurrentHashMap<>();
+
     @Data
     public static class GB28181Session {
         private String deviceId;
@@ -173,7 +176,7 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
             CallIdHeader callIdHeader = provider.getNewCallId();
             CSeqHeader cSeqHeader = headerFactory.createCSeqHeader(1L, Request.INVITE);
 
-            SipURI fromUri = addressFactory.createSipURI(sipConfig.getId(), sipConfig.getIp() + ":" + sipConfig.getPort());
+            SipURI fromUri = addressFactory.createSipURI(sipConfig.getId(), sipConfig.getDomain());
             Address fromAddress = addressFactory.createAddress(fromUri);
             FromHeader fromHeader = headerFactory.createFromHeader(fromAddress, UUID.randomUUID().toString().replace("-", ""));
 
@@ -189,6 +192,7 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
 
             ArrayList<ViaHeader> viaHeaders = new ArrayList<>();
             ViaHeader viaHeader = headerFactory.createViaHeader(sipConfig.getIp(), sipConfig.getPort(), device.getTransport(), null);
+            viaHeader.setRPort();
             viaHeaders.add(viaHeader);
 
             Request request = messageFactory.createRequest(requestUri, Request.INVITE, callIdHeader, cSeqHeader,
@@ -278,8 +282,8 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
     @Override
     public void startTalk(String deviceId, String channelId) {
         String sessionKey = deviceId + "_talk";
-        if (sessions.containsKey(sessionKey)) {
-            log.info("GB28181 voice intercom already in progress for device: {}, ignore.", deviceId);
+        if (sessions.containsKey(sessionKey) || sessions.containsKey(channelId + "_talk")) {
+            log.info("GB28181 voice intercom already in progress for device: {} or channel: {}, ignore.", deviceId, channelId);
             return;
         }
 
@@ -312,7 +316,8 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
             session.setTalk(true);
 
             sessions.put(sessionKey, session);
-            log.info("Initialized GB28181 talk session state for: {}, waiting for incoming INVITE from device.", sessionKey);
+            sessions.put(channelId + "_talk", session);
+            log.info("Initialized GB28181 talk session state for: {} & {}, waiting for incoming INVITE from device.", sessionKey, channelId + "_talk");
 
         } catch (Exception e) {
             log.error("Failed to initialize GB28181 talkback session", e);
@@ -325,10 +330,15 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
         String sessionKey = deviceId + "_talk";
         GB28181Session session = sessions.remove(sessionKey);
         if (session == null) {
+            session = sessions.remove(channelId + "_talk");
+        }
+        if (session == null) {
             log.warn("GB28181 stopTalk failed: No active intercom session for {}", sessionKey);
             return;
         }
 
+        sessions.remove(session.getDeviceId() + "_talk");
+        sessions.remove(session.getChannelId() + "_talk");
         sessions.remove(session.getCallId());
 
         try {
@@ -366,17 +376,25 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
     }
 
     private void triggerZlmStopSendRtp(String deviceId) {
-        String zlmUrl = "http://127.0.0.1:7788/index/api/stopSendRtp";
-        Map<String, Object> params = new HashMap<>();
-        params.put("secret", "hik12345");
-        params.put("vhost", "__defaultVhost__");
-        params.put("app", "live");
-        params.put("stream", deviceId + "_talk");
+        try {
+            String talkStream = deviceId + "_talk";
+            com.aizuda.zlm4j.structure.MK_MEDIA_SOURCE ctx = zlmApi.mk_media_source_find2("rtp", "__defaultVhost__", "live", talkStream, 0);
+            if (ctx == null) {
+                ctx = zlmApi.mk_media_source_find2("rtsp", "__defaultVhost__", "live", talkStream, 0);
+            }
+            if (ctx == null) {
+                ctx = zlmApi.mk_media_source_find2("rtmp", "__defaultVhost__", "live", talkStream, 0);
+            }
 
-        WebFluxHttpUtil.postAsync(zlmUrl, params, String.class).subscribe(
-                resp -> log.info("ZLMediaKit stopSendRtp success: {}", resp),
-                err -> log.error("ZLMediaKit stopSendRtp error: {}", err.getMessage())
-        );
+            if (ctx != null) {
+                int result = zlmApi.mk_media_source_stop_send_rtp(ctx);
+                log.info("ZLMediaKit stopSendRtp native result: {}", result);
+            } else {
+                log.warn("ZLMediaKit stopSendRtp skipped: MediaSource live/{} not found", talkStream);
+            }
+        } catch (Exception e) {
+            log.error("Failed to stop native send rtp for device: {}", deviceId, e);
+        }
     }
 
     public void handleResponse(ResponseEvent responseEvent) {
@@ -428,7 +446,7 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
                                 byte[] rawContent = response.getRawContent();
                                 if (rawContent != null && rawContent.length > 0) {
                                     String responseSdp = new String(rawContent, "UTF-8");
-                                    String dstIp = parseIpFromSdp(responseSdp);
+                                    String dstIp = getResolvedDstIp(parseIpFromSdp(responseSdp), session.getDeviceId());
                                     int dstPort = parsePortFromSdp(responseSdp, "video");
                                     if (dstIp != null && dstPort > 0) {
                                         log.info("TCP-PASSIVE mode: Connecting ZLM RTP server to device {}:{}", dstIp, dstPort);
@@ -449,7 +467,7 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
                                 String responseSdp = new String(rawContent, "UTF-8");
                                 log.info("Intercom device SDP response:\n{}", responseSdp);
 
-                                String dstIp = parseIpFromSdp(responseSdp);
+                                String dstIp = getResolvedDstIp(parseIpFromSdp(responseSdp), session.getDeviceId());
                                 int dstPort = parsePortFromSdp(responseSdp, "audio");
 
                                 if (dstIp != null && dstPort > 0) {
@@ -491,6 +509,9 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
             
             GB28181Session session = sessions.get(sessionKey);
             if (session == null) {
+                session = sessions.get(deviceId + "_talk");
+            }
+            if (session == null) {
                 log.warn("Received unexpected INVITE from device {}, no active talk session. Rejecting with 481.", deviceId);
                 Response response = GB28181SipListener.getMessageFactory().createResponse(481, request);
                 sendResponse(provider, requestEvent, response);
@@ -508,7 +529,7 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
             String deviceSdp = new String(rawContent, "UTF-8");
             log.info("Received device INVITE SDP for intercom:\n{}", deviceSdp);
             
-            String dstIp = parseIpFromSdp(deviceSdp);
+            String dstIp = getResolvedDstIp(parseIpFromSdp(deviceSdp), deviceId);
             int dstPort = parsePortFromSdp(deviceSdp, "audio");
             
             // 解析传输协议和 TCP 主被动模式
@@ -570,14 +591,16 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
             
             if (isTcp) {
                 localSdp += "m=audio " + session.getRtpPort() + " TCP/RTP/AVP 8\r\n" +
+                        "a=connection:new\r\n" +
                         "a=setup:" + (tcpMode == 1 ? "passive" : "active") + "\r\n";
             } else {
                 localSdp += "m=audio " + session.getRtpPort() + " RTP/AVP 8\r\n";
             }
             
-            localSdp += "a=rtpmap:8 PCMA/8000\r\n" +
+            localSdp += "a=rtpmap:8 PCMA/8000/1\r\n" +
                     "a=sendonly\r\n" +
-                    "y=" + session.getSsrc() + "\r\n";
+                    "y=" + session.getSsrc() + "\r\n" +
+                    "f=v/////a/1/8/1\r\n";
             
             log.info("Responding to device INVITE with local SDP:\n{}", localSdp);
             
@@ -597,15 +620,45 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
             serverTransaction.sendResponse(response);
             log.info("Sent 200 OK for incoming GB28181 intercom INVITE");
             
-            // 5. 触发 ZLMediaKit 连接/发流
+            // 5. TCP 主动模式：ZLM 主动连接设备 RTP 端口（接收设备推流用，与推流无关）
             if (tcpMode == 2) {
                 zlmApi.mk_rtp_server_connect(mkRtpServer, dstIp, (short) dstPort, null, null);
                 log.info("ZLM TCP active mode: connected to {}:{}", dstIp, dstPort);
             }
-            
-            // 无论 UDP 还是 TCP，我们都要开始推流
+
+            // 6. 等待浏览器 WebRTC 推流就绪后再触发 ZLM 推流到设备
+            // 说明：浏览器建立 WebRTC 推流（WHIP）需要几秒钟，而设备 INVITE 在 MESSAGE 后
+            //       约 500ms 内就到达，直接调用 startSendRtp 时 live/{deviceId}_talk 流
+            //       尚不存在，导致 ZLM 静默失败、设备收不到音频。
+            //       此处改为后台轮询，等流就绪后再推。
             if (dstIp != null && dstPort > 0) {
-                triggerZlmStartSendRtp(deviceId, dstIp, dstPort, session.getSsrc(), !isTcp);
+                final String finalDeviceId = session.getDeviceId();
+                final String finalDstIp = dstIp;
+                final int finalDstPort = dstPort;
+                final String finalSsrc = session.getSsrc();
+                final boolean finalIsUdp = !isTcp;
+                Thread pushWaitThread = new Thread(() -> {
+                    String talkStream = finalDeviceId + "_talk";
+                    int maxRetries = 60; // 最多等 30 秒 (60 × 500ms)
+                    for (int i = 0; i < maxRetries; i++) {
+                        try {
+                            Thread.sleep(500);
+                        } catch (InterruptedException ex) {
+                            Thread.currentThread().interrupt();
+                            return;
+                        }
+                        if (isStreamExistInZlm("live", talkStream)) {
+                            log.info("[对讲] ZLM 推流 live/{} 已就绪，触发 startSendRtp 到 {}:{}", talkStream, finalDstIp, finalDstPort);
+                            triggerZlmStartSendRtp(finalDeviceId, finalDstIp, finalDstPort, finalSsrc, finalIsUdp);
+                            return;
+                        }
+                        log.debug("[对讲] 等待 ZLM 流 live/{} 就绪 ({}/{})", talkStream, i + 1, maxRetries);
+                    }
+                    log.warn("[对讲] 等待 ZLM 流 live/{} 超时（30s），放弃推流", talkStream);
+                });
+                pushWaitThread.setName("gb-talk-push-" + session.getDeviceId());
+                pushWaitThread.setDaemon(true);
+                pushWaitThread.start();
             }
             
         } catch (Exception e) {
@@ -663,6 +716,17 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
         return null;
     }
 
+    private String getResolvedDstIp(String parsedIp, String deviceId) {
+        GbDevice device = deviceMapper.selectByDeviceId(deviceId);
+        if (device != null && device.getIp() != null && !device.getIp().isEmpty()) {
+            if (!device.getIp().equals(parsedIp)) {
+                log.info("Overriding destination IP {} with registered device IP {} for device {}", parsedIp, device.getIp(), deviceId);
+            }
+            return device.getIp();
+        }
+        return parsedIp;
+    }
+
     private int parsePortFromSdp(String sdp, String mediaType) {
         for (String line : sdp.split("\n")) {
             line = line.trim();
@@ -680,31 +744,72 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
         return -1;
     }
 
+    /**
+     * 通过 ZLM JNA 接口检查指定流是否已在 ZLM 中注册（即浏览器推流是否就绪）
+     */
+    private boolean isStreamExistInZlm(String app, String stream) {
+        try {
+            com.aizuda.zlm4j.structure.MK_MEDIA_SOURCE ctx = zlmApi.mk_media_source_find2("rtp", "__defaultVhost__", app, stream, 0);
+            if (ctx == null) {
+                ctx = zlmApi.mk_media_source_find2("rtsp", "__defaultVhost__", app, stream, 0);
+            }
+            if (ctx == null) {
+                ctx = zlmApi.mk_media_source_find2("rtmp", "__defaultVhost__", app, stream, 0);
+            }
+            return ctx != null;
+        } catch (Exception e) {
+            log.error("检查流是否存在异常", e);
+        }
+        return false;
+    }
+
     private void triggerZlmStartSendRtp(String deviceId, String dstIp, int dstPort, String ssrc) {
         triggerZlmStartSendRtp(deviceId, dstIp, dstPort, ssrc, true);
     }
 
     private void triggerZlmStartSendRtp(String deviceId, String dstIp, int dstPort, String ssrc, boolean isUdp) {
-        long ssrcLong = Long.parseLong(ssrc);
-        String ssrcHex = Long.toHexString(ssrcLong).toUpperCase();
+        try {
+            String talkStream = deviceId + "_talk";
+            com.aizuda.zlm4j.structure.MK_MEDIA_SOURCE ctx = zlmApi.mk_media_source_find2("rtp", "__defaultVhost__", "live", talkStream, 0);
+            if (ctx == null) {
+                ctx = zlmApi.mk_media_source_find2("rtsp", "__defaultVhost__", "live", talkStream, 0);
+            }
+            if (ctx == null) {
+                ctx = zlmApi.mk_media_source_find2("rtmp", "__defaultVhost__", "live", talkStream, 0);
+            }
 
-        String zlmUrl = "http://127.0.0.1:7788/index/api/startSendRtp";
-        Map<String, Object> params = new HashMap<>();
-        params.put("secret", "hik12345");
-        params.put("vhost", "__defaultVhost__");
-        params.put("app", "live");
-        params.put("stream", deviceId + "_talk");
-        params.put("dst_url", dstIp);
-        params.put("dst_port", dstPort);
-        params.put("ssrc", ssrcHex);
-        params.put("is_udp", isUdp ? 1 : 0);
-        params.put("pt", 8); // PCMA 音频格式 PayloadType 8
-        params.put("use_ps", 0); // 直接推 PCMA 音频 ES 流，不要封装为 PS
+            if (ctx == null) {
+                log.error("ZLMediaKit startSendRtp failed: MediaSource live/{} not found", talkStream);
+                return;
+            }
 
-        log.info("Triggering ZLMediaKit startSendRtp to {}:{} SSRC:{} isUdp:{}", dstIp, dstPort, ssrcHex, isUdp);
-        WebFluxHttpUtil.postAsync(zlmUrl, params, String.class).subscribe(
-                resp -> log.info("ZLMediaKit startSendRtp success: {}", resp),
-                err -> log.error("ZLMediaKit startSendRtp error: {}", err.getMessage())
-        );
+            log.info("Triggering ZLMediaKit native startSendRtp to {}:{} SSRC:{} isUdp:{}", dstIp, dstPort, ssrc, isUdp);
+
+            String callbackKey = deviceId + "_" + dstPort;
+            com.aizuda.zlm4j.callback.IMKSourceSendRtpResultCallBack cb = new com.aizuda.zlm4j.callback.IMKSourceSendRtpResultCallBack() {
+                @Override
+                public void invoke(com.sun.jna.Pointer user_data, short port, int err, String msg) {
+                    if (err == 0) {
+                        log.info("ZLMediaKit startSendRtp native success callback on port: {}", port);
+                    } else {
+                        log.error("ZLMediaKit startSendRtp native error callback: {} (code: {})", msg, err);
+                    }
+                    activeRtpCallbacks.remove(callbackKey);
+                }
+            };
+            activeRtpCallbacks.put(callbackKey, cb);
+
+            zlmApi.mk_media_source_start_send_rtp(
+                    ctx,
+                    dstIp,
+                    (short) dstPort,
+                    ssrc,
+                    isUdp ? 1 : 0,
+                    cb,
+                    null
+            );
+        } catch (Exception e) {
+            log.error("Failed to trigger native startSendRtp for device: {}", deviceId, e);
+        }
     }
 }

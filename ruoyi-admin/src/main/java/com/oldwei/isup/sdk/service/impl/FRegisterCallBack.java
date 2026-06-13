@@ -190,6 +190,7 @@ public class FRegisterCallBack implements DEVICE_REGISTER_CB {
                 hikISUPAlarm.NET_EALARM_SetDeviceSessionKey(pSessionKey);
                 break;
             case EHOME_REGISTER_TYPE.ENUM_DEV_DAS_REQ: // 5 HCISUPCMS.ENUM_DEV_DAS_REQ
+            case EHOME_REGISTER_TYPE.ENUM_DEV_DAS_REREGISTER: // 7
                 String dasInfo = "{\n" +
                         "    \"Type\":\"DAS\",\n" +
                         "    \"DasInfo\": {\n" +
@@ -197,12 +198,12 @@ public class FRegisterCallBack implements DEVICE_REGISTER_CB {
                         "        \"Domain\":\"\",\n" +
                         "        \"ServerID\":\"\",\n" +
                         "        \"Port\":" + hikIsupProperties.getDasServer().getPort() + ",\n" +
-                        "        \"UdpPort\":\n" +
+                        "        \"UdpPort\":" + hikIsupProperties.getDasServer().getPort() + "\n" +
                         "    }\n" +
                         "}";
                 byte[] bs1 = dasInfo.getBytes();
                 pInBuffer.write(0, bs1, 0, dasInfo.length());
-                log.info("Ehome5.0设备DAS请求回调 Device DAS request: {}", dasInfo);
+                log.info("Ehome5.0设备DAS/重注册请求回调 Device DAS/Reregister request, dwDataType: {}, dasInfo: {}", dwDataType, dasInfo);
                 break;
             default:
                 log.info("FRegisterCallBack default type: {}", dwDataType);
