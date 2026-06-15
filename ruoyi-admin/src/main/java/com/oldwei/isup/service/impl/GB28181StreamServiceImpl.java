@@ -474,7 +474,19 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
                             int dstPort = parsePortFromSdp(responseSdp, "audio");
 
                             if (dstIp != null && dstPort > 0) {
-                                triggerZlmStartSendRtp(session.getDeviceId(), dstIp, dstPort, session.getSsrc());
+                                boolean isTcp = isTcpMedia(responseSdp, "audio");
+                                int isUdpVal = 1;
+                                int dstPortVal = dstPort;
+                                if (isTcp) {
+                                    String setup = parseSetupFromSdp(responseSdp);
+                                    if ("active".equalsIgnoreCase(setup)) {
+                                        isUdpVal = 2; // TCP passive (ZLM listens)
+                                        dstPortVal = session.getRtpPort();
+                                    } else {
+                                        isUdpVal = 0; // TCP active (ZLM connects)
+                                    }
+                                }
+                                triggerZlmStartSendRtp(session.getDeviceId(), dstIp, dstPortVal, session.getSsrc(), isUdpVal);
                             } else {
                                 log.error("Failed to parse audio destination IP/Port from device SDP.");
                             }
@@ -635,9 +647,9 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
             if (dstIp != null && dstPort > 0) {
                 final String finalDeviceId = session.getDeviceId();
                 final String finalDstIp = dstIp;
-                final int finalDstPort = dstPort;
                 final String finalSsrc = session.getSsrc();
-                final boolean finalIsUdp = !isTcp;
+                final int finalIsUdpVal = isTcp ? (tcpMode == 1 ? 2 : 0) : 1;
+                final int finalDstPort = finalIsUdpVal == 2 ? session.getRtpPort() : dstPort;
                 Thread pushWaitThread = new Thread(() -> {
                     String talkStream = finalDeviceId + "_talk";
                     int maxRetries = 60; // 最多等 30 秒 (60 × 500ms)
@@ -650,7 +662,7 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
                         }
                         if (isStreamExistInZlm("live", talkStream)) {
                             log.info("[对讲] ZLM 推流 live/{} 已就绪，触发 startSendRtp 到 {}:{}", talkStream, finalDstIp, finalDstPort);
-                            triggerZlmStartSendRtp(finalDeviceId, finalDstIp, finalDstPort, finalSsrc, finalIsUdp);
+                            triggerZlmStartSendRtp(finalDeviceId, finalDstIp, finalDstPort, finalSsrc, finalIsUdpVal);
                             return;
                         }
                         log.debug("[对讲] 等待 ZLM 流 live/{} 就绪 ({}/{})", talkStream, i + 1, maxRetries);
@@ -835,52 +847,74 @@ public class GB28181StreamServiceImpl implements IGB28181StreamService {
     }
 
     private void triggerZlmStartSendRtp(String deviceId, String dstIp, int dstPort, String ssrc) {
-        triggerZlmStartSendRtp(deviceId, dstIp, dstPort, ssrc, true);
+        triggerZlmStartSendRtp(deviceId, dstIp, dstPort, ssrc, 1);
     }
 
-    private void triggerZlmStartSendRtp(String deviceId, String dstIp, int dstPort, String ssrc, boolean isUdp) {
+    private void triggerZlmStartSendRtp(String deviceId, String dstIp, int dstPort, String ssrc, int isUdp) {
         try {
             String talkStream = deviceId + "_talk";
-            com.aizuda.zlm4j.structure.MK_MEDIA_SOURCE ctx = zlmApi.mk_media_source_find2("rtp", "__defaultVhost__", "live", talkStream, 0);
-            if (ctx == null) {
-                ctx = zlmApi.mk_media_source_find2("rtsp", "__defaultVhost__", "live", talkStream, 0);
+            String zlmPort = hikStreamProperties.getHttp().getPort();
+            String zlmIp = "127.0.0.1";
+            
+            // Build the URL based on the mode
+            String apiPath = (isUdp == 2) ? "/index/api/startSendRtpPassive" : "/index/api/startSendRtp";
+            
+            StringBuilder urlBuilder = new StringBuilder();
+            urlBuilder.append("http://").append(zlmIp).append(":").append(zlmPort).append(apiPath)
+                    .append("?secret=hik12345")
+                    .append("&vhost=__defaultVhost__")
+                    .append("&app=live")
+                    .append("&stream=").append(talkStream)
+                    .append("&ssrc=").append(ssrc)
+                    .append("&pt=8")
+                    .append("&only_audio=1");
+                    
+            if (isUdp == 2) {
+                urlBuilder.append("&is_udp=0")
+                        .append("&src_port=").append(dstPort)
+                        .append("&dst_url=").append(dstIp)
+                        .append("&dst_port=").append(dstPort);
+            } else {
+                urlBuilder.append("&is_udp=").append(isUdp)
+                        .append("&dst_url=").append(dstIp)
+                        .append("&dst_port=").append(dstPort);
             }
-            if (ctx == null) {
-                ctx = zlmApi.mk_media_source_find2("rtmp", "__defaultVhost__", "live", talkStream, 0);
-            }
-
-            if (ctx == null) {
-                log.error("ZLMediaKit startSendRtp failed: MediaSource live/{} not found", talkStream);
-                return;
-            }
-
-            log.info("Triggering ZLMediaKit native startSendRtp to {}:{} SSRC:{} isUdp:{}", dstIp, dstPort, ssrc, isUdp);
-
-            String callbackKey = deviceId + "_" + dstPort;
-            com.aizuda.zlm4j.callback.IMKSourceSendRtpResultCallBack cb = new com.aizuda.zlm4j.callback.IMKSourceSendRtpResultCallBack() {
-                @Override
-                public void invoke(com.sun.jna.Pointer user_data, short port, int err, String msg) {
-                    if (err == 0) {
-                        log.info("ZLMediaKit startSendRtp native success callback on port: {}", port);
-                    } else {
-                        log.error("ZLMediaKit startSendRtp native error callback: {} (code: {})", msg, err);
+            
+            String requestUrl = urlBuilder.toString();
+            log.info("Triggering ZLMediaKit REST API: {}", requestUrl.replace("secret=hik12345", "secret=***"));
+            
+            java.net.URL url = new java.net.URL(requestUrl);
+            java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(5000);
+            
+            int responseCode = conn.getResponseCode();
+            if (responseCode == 200) {
+                try (java.io.BufferedReader in = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream(), "UTF-8"))) {
+                    StringBuilder response = new StringBuilder();
+                    String inputLine;
+                    while ((inputLine = in.readLine()) != null) {
+                        response.append(inputLine);
                     }
-                    activeRtpCallbacks.remove(callbackKey);
+                    log.info("ZLMediaKit REST API response: {}", response.toString());
                 }
-            };
-            activeRtpCallbacks.put(callbackKey, cb);
-
-            zlmApi.mk_media_source_start_send_rtp(
-                    ctx,
-                    dstIp,
-                    (short) dstPort,
-                    ssrc,
-                    isUdp ? 1 : 0,
-                    cb,
-                    null
-            );
+            } else {
+                java.io.InputStream errStream = conn.getErrorStream();
+                if (errStream == null) {
+                    errStream = conn.getInputStream();
+                }
+                try (java.io.BufferedReader in = new java.io.BufferedReader(new java.io.InputStreamReader(errStream, "UTF-8"))) {
+                    StringBuilder errorResponse = new StringBuilder();
+                    String inputLine;
+                    while ((inputLine = in.readLine()) != null) {
+                        errorResponse.append(inputLine);
+                    }
+                    log.error("ZLMediaKit REST API failed with code {}: {}", responseCode, errorResponse.toString());
+                }
+            }
         } catch (Exception e) {
-            log.error("Failed to trigger native startSendRtp for device: {}", deviceId, e);
+            log.error("Failed to trigger startSendRtp via ZLMediaKit REST API for device: {}. Exception: {}", deviceId, e.getMessage(), e);
         }
     }
 }
